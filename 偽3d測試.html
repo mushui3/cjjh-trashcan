@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>打丁大又考試</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            color: white;
+            flex-direction: column;
+        }
+        canvas {
+            background-color: #000;
+            border: 2px solid #555;
+            display: block;
+        }
+        #instructions {
+            margin-top: 20px;
+            font-size: 1.1em;
+            text-align: center;
+        }
+        #instructions kbd {
+            display: inline-block;
+            padding: 3px 8px;
+            border: 1px solid #777;
+            border-radius: 4px;
+            background-color: #444;
+            box-shadow: 0 1px 0 rgba(0,0,0,0.2);
+            margin: 0 2px;
+        }
+        #game-info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 1.2em;
+        }
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 3em;
+            text-align: center;
+            display: none; /* 預設隱藏 */
+        }
+        #game-over-screen button {
+            padding: 15px 30px;
+            font-size: 0.5em;
+            margin-top: 20px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        #game-over-screen button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>打丁大又考試</h1>
+    <canvas id="gameCanvas" width="640" height="480"></canvas>
+    <div id="instructions">
+        <h2>操作說明：</h2>
+        <p>
+            移動: <kbd>W</kbd> (前進) <kbd>S</kbd> (後退) <br>
+            轉向: <kbd>A</kbd> (左轉) <kbd>D</kbd> (右轉) <br>
+            射擊: <kbd>滑鼠左鍵</kbd> 或 <kbd>Space</kbd>
+        </p>
+    </div>
+    <div id="game-info">
+        老子生命值: <span id="playerHealth">100</span><br>
+        丁大又剩餘: <span id="enemiesRemaining">0</span>
+    </div>
+
+    <div id="game-over-screen">
+        <h2 id="game-over-message"></h2>
+        <button id="restartButton">重新開始</button>
+    </div>
+
+    <script>
+        // --- 設定 Canvas ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+
+        // --- 地圖設定 ---
+        const MAP_WIDTH = 16;
+        const MAP_HEIGHT = 16;
+        const TILE_SIZE = 32;
+        let MAP = [];
+
+        // --- 玩家設定 ---
+        const player = {
+            x: TILE_SIZE * 1.5,
+            y: TILE_SIZE * 1.5,
+            angle: Math.PI / 2,
+            fov: Math.PI / 3,
+            speed: 3,
+            rotationSpeed: 0.05,
+            health: 100,
+            maxHealth: 100,
+            attackCooldown: 0,
+            lastAttackTime: 0
+        };
+
+        // --- 小地圖設定 ---
+        const MINI_MAP_SCALE = 0.2;
+        const MINI_MAP_SIZE_X = MAP_WIDTH * TILE_SIZE * MINI_MAP_SCALE;
+        const MINI_MAP_SIZE_Y = MAP_HEIGHT * TILE_SIZE * MINI_MAP_SCALE;
+        const PLAYER_ICON_SIZE = 5;
+
+        // --- 敵人設定 ---
+        const ENEMY_COUNT = 5; // 敵人數量
+        const ENEMY_SIZE = TILE_SIZE * 0.6; // 敵人大小
+        const ENEMY_SPEED = 1.5; // 敵人移動速度
+        const ENEMY_ATTACK_RANGE = TILE_SIZE * 0.7; // 敵人攻擊玩家的距離
+        const ENEMY_ATTACK_DAMAGE = 10; // 敵人每次攻擊的傷害
+        const ENEMY_ATTACK_COOLDOWN = 1000; // 敵人攻擊冷卻時間 (毫秒)
+        const ENEMY_HEALTH = 30; // 敵人生命值
+        let enemies = [];
+
+        // --- 子彈設定 ---
+        const BULLET_SPEED = 15; // 子彈速度
+        const BULLET_RADIUS = 3; // 子彈半徑
+        const BULLET_DAMAGE = 20; // 子彈傷害
+        const PLAYER_FIRE_COOLDOWN = 200; // 玩家射擊冷卻時間 (毫秒)
+        let bullets = [];
+
+        // --- 遊戲狀態 ---
+        let lastFrameTime = performance.now();
+        let gameOver = false;
+
+        // --- UI 元素 ---
+        const playerHealthSpan = document.getElementById('playerHealth');
+        const enemiesRemainingSpan = document.getElementById('enemiesRemaining');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const restartButton = document.getElementById('restartButton');
+
+        // --- 鍵盤和滑鼠狀態 ---
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true; // 統一小寫
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false; // 統一小寫
+        });
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) { // 左鍵
+                keys['mouse0'] = true;
+            }
+        });
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 0) {
+                keys['mouse0'] = false;
+            }
+        });
+
+        restartButton.addEventListener('click', () => {
+            resetGame();
+        });
+
+
+        // --- 遊戲邏輯函數 ---
+
+        function generateMap() {
+            MAP = [];
+            for (let y = 0; y < MAP_HEIGHT; y++) {
+                MAP.push([]);
+                for (let x = 0; x < MAP_WIDTH; x++) {
+                    if (x === 0 || x === MAP_WIDTH - 1 || y === 0 || y === MAP_HEIGHT - 1 || Math.random() < 0.2) {
+                        MAP[y][x] = 1; // 牆壁
+                    } else {
+                        MAP[y][x] = 0; // 空地
+                    }
+                }
+            }
+            // 確保玩家初始位置在空地
+            let playerSpawned = false;
+            while (!playerSpawned) {
+                const startX = Math.floor(Math.random() * (MAP_WIDTH - 2)) + 1;
+                const startY = Math.floor(Math.random() * (MAP_HEIGHT - 2)) + 1;
+                if (MAP[startY][startX] === 0) {
+                    player.x = startX * TILE_SIZE + TILE_SIZE / 2;
+                    player.y = startY * TILE_SIZE + TILE_SIZE / 2;
+                    playerSpawned = true;
+                }
+            }
+        }
+
+        function spawnEnemies() {
+            enemies = [];
+            let spawnedCount = 0;
+            const maxAttempts = 100; // 防止無限迴圈
+            let attempts = 0;
+
+            while (spawnedCount < ENEMY_COUNT && attempts < maxAttempts * ENEMY_COUNT) {
+                const randX = Math.floor(Math.random() * (MAP_WIDTH - 2)) + 1;
+                const randY = Math.floor(Math.random() * (MAP_HEIGHT - 2)) + 1;
+
+                // 檢查是否是空地且離玩家足夠遠
+                const dx = randX * TILE_SIZE - player.x;
+                const dy = randY * TILE_SIZE - player.y;
+                const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+
+                if (MAP[randY][randX] === 0 && distToPlayer > TILE_SIZE * 3) { // 敵人出生點離玩家至少 3 個單位
+                    enemies.push({
+                        x: randX * TILE_SIZE + TILE_SIZE / 2,
+                        y: randY * TILE_SIZE + TILE_SIZE / 2,
+                        health: ENEMY_HEALTH,
+                        lastAttackTime: 0
+                    });
+                    spawnedCount++;
+                }
+                attempts++;
+            }
+        }
+
+        // 檢查給定座標是否會撞牆
+        function checkCollision(x, y, radius = 0) {
+            const mapX = Math.floor(x / TILE_SIZE);
+            const mapY = Math.floor(y / TILE_SIZE);
+
+            // 檢查是否在地圖邊界外
+            if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) {
+                return true; // 視為撞牆
+            }
+
+            // 檢查地圖上的單元格是否為牆壁
+            if (MAP[mapY][mapX] === 1) {
+                return true;
+            }
+            return false;
+        }
+
+        function update(deltaTime) {
+            if (gameOver) return;
+
+            // --- 玩家移動 ---
+            let newPlayerX = player.x;
+            let newPlayerY = player.y;
+            let newPlayerAngle = player.angle;
+
+            if (keys['a']) newPlayerAngle -= player.rotationSpeed;
+            if (keys['d']) newPlayerAngle += player.rotationSpeed;
+
+            let moveAmount = 0;
+            if (keys['w']) moveAmount = player.speed * (deltaTime / 16.67); // 基於幀率調整速度
+            if (keys['s']) moveAmount = -player.speed * (deltaTime / 16.67);
+
+            if (moveAmount !== 0) {
+                const targetX = player.x + Math.cos(newPlayerAngle) * moveAmount;
+                const targetY = player.y + Math.sin(newPlayerAngle) * moveAmount;
+
+                // 簡單的軸向碰撞檢測
+                if (!checkCollision(targetX, player.y)) { // 先檢查X軸移動
+                    newPlayerX = targetX;
+                }
+                if (!checkCollision(player.x, targetY)) { // 再檢查Y軸移動
+                    newPlayerY = targetY;
+                }
+            }
+
+            player.x = newPlayerX;
+            player.y = newPlayerY;
+            player.angle = newPlayerAngle;
+
+            // --- 玩家射擊 ---
+            const currentTime = performance.now();
+            if ((keys['mouse0'] || keys[' ']) && (currentTime - player.lastAttackTime > PLAYER_FIRE_COOLDOWN)) {
+                bullets.push({
+                    x: player.x,
+                    y: player.y,
+                    angle: player.angle,
+                    speed: BULLET_SPEED,
+                    damage: BULLET_DAMAGE
+                });
+                player.lastAttackTime = currentTime;
+            }
+
+            // --- 更新子彈 ---
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                const newBulletX = bullet.x + Math.cos(bullet.angle) * bullet.speed * (deltaTime / 16.67);
+                const newBulletY = bullet.y + Math.sin(bullet.angle) * bullet.speed * (deltaTime / 16.67);
+
+                // 檢查子彈是否撞牆
+                if (checkCollision(newBulletX, newBulletY)) {
+                    bullets.splice(i, 1); // 移除子彈
+                    continue;
+                }
+
+                bullet.x = newBulletX;
+                bullet.y = newBulletY;
+
+                // 檢查子彈是否擊中敵人
+                let hitEnemy = false;
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    const dist = Math.sqrt(Math.pow(bullet.x - enemy.x, 2) + Math.pow(bullet.y - enemy.y, 2));
+                    if (dist < BULLET_RADIUS + ENEMY_SIZE / 2) {
+                        enemy.health -= bullet.damage;
+                        hitEnemy = true;
+                        bullets.splice(i, 1); // 移除子彈
+                        break;
+                    }
+                }
+            }
+
+            // --- 更新敵人 ---
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+
+                // 敵人死亡
+                if (enemy.health <= 0) {
+                    enemies.splice(i, 1);
+                    continue;
+                }
+
+                // 敵人朝向玩家移動
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+
+                if (distToPlayer > ENEMY_ATTACK_RANGE) { // 在攻擊範圍外才移動
+                    const enemyAngleToPlayer = Math.atan2(dy, dx);
+                    const moveX = Math.cos(enemyAngleToPlayer) * ENEMY_SPEED * (deltaTime / 16.67);
+                    const moveY = Math.sin(enemyAngleToPlayer) * ENEMY_SPEED * (deltaTime / 16.67);
+
+                    const newEnemyX = enemy.x + moveX;
+                    const newEnemyY = enemy.y + moveY;
+
+                    // 敵人碰撞檢測 (簡單的矩形碰撞)
+                    let collided = false;
+                    // 檢查與牆壁碰撞
+                    if (checkCollision(newEnemyX, newEnemyY, ENEMY_SIZE / 2)) {
+                        collided = true;
+                    }
+                    // 檢查與其他敵人碰撞 (簡單的距離判斷)
+                    for (let k = 0; k < enemies.length; k++) {
+                        if (i === k) continue; // 不與自己比較
+                        const otherEnemy = enemies[k];
+                        const distBetweenEnemies = Math.sqrt(Math.pow(newEnemyX - otherEnemy.x, 2) + Math.pow(newEnemyY - otherEnemy.y, 2));
+                        if (distBetweenEnemies < ENEMY_SIZE) { // 如果太近
+                             collided = true;
+                             break;
+                        }
+                    }
+
+                    if (!collided) {
+                        enemy.x = newEnemyX;
+                        enemy.y = newEnemyY;
+                    }
+                } else { // 在攻擊範圍內，嘗試攻擊玩家
+                    if (currentTime - enemy.lastAttackTime > ENEMY_ATTACK_COOLDOWN) {
+                        player.health -= ENEMY_ATTACK_DAMAGE;
+                        enemy.lastAttackTime = currentTime;
+                        // console.log("老子生命值:", player.health);
+                    }
+                }
+            }
+
+            // --- 更新 UI ---
+            playerHealthSpan.textContent = Math.max(0, Math.floor(player.health));
+            enemiesRemainingSpan.textContent = enemies.length;
+
+            // --- 遊戲結束條件 ---
+            if (player.health <= 0) {
+                gameOver = true;
+                gameOverMessage.textContent = "考試不及格！";
+                gameOverScreen.style.display = 'flex';
+            } else if (enemies.length === 0 && ENEMY_COUNT > 0) { // 確保有敵人存在才判斷勝利
+                gameOver = true;
+                gameOverMessage.textContent = "恭喜！你消滅了所有丁大又！";
+                gameOverScreen.style.display = 'flex';
+            }
+        }
+
+        // --- 繪製遊戲畫面 ---
+        function draw() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+            // 繪製天花板和地板
+            ctx.fillStyle = '#66AACC'; // 天空藍
+            ctx.fillRect(0, 0, WIDTH, HEIGHT / 2);
+            ctx.fillStyle = '#444'; // 地板灰
+            ctx.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT / 2);
+
+            const objectsToDraw = []; // 用於排序牆壁和敵人
+
+            // 光線投射繪製牆壁
+            for (let i = 0; i < WIDTH; i++) {
+                const rayAngle = player.angle - player.fov / 2 + (player.fov * i / WIDTH);
+                let hitWall = false;
+                let distance = 0;
+
+                for (let d = 0; d < 500; d += 1) {
+                    const testX = player.x + Math.cos(rayAngle) * d;
+                    const testY = player.y + Math.sin(rayAngle) * d;
+
+                    if (testX < 0 || testX >= MAP_WIDTH * TILE_SIZE || testY < 0 || testY >= MAP_HEIGHT * TILE_SIZE) break;
+
+                    const wallX = Math.floor(testX / TILE_SIZE);
+                    const wallY = Math.floor(testY / TILE_SIZE);
+
+                    if (MAP[wallY][wallX] === 1) {
+                        hitWall = true;
+                        distance = d;
+                        break;
+                    }
+                }
+
+                if (hitWall) {
+                    const correctedDistance = distance * Math.cos(rayAngle - player.angle);
+                    const wallHeight = TILE_SIZE * HEIGHT / correctedDistance;
+                    const drawY = (HEIGHT / 2) - (wallHeight / 2);
+                    const darkness = Math.min(1, correctedDistance / (TILE_SIZE * 5));
+                    const colorValue = Math.floor(255 * (1 - darkness));
+                    ctx.fillStyle = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
+                    ctx.fillRect(i, drawY, 1, wallHeight);
+                }
+            }
+
+            // --- 收集敵人以進行繪製排序 ---
+            enemies.forEach(enemy => {
+                const dx = enemy.x - player.x;
+                const dy = enemy.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const enemyAngle = Math.atan2(dy, dx);
+
+                // 計算相對於玩家視野中心的角度
+                let angleDiff = player.angle - enemyAngle;
+                // 調整角度差，使其在 -PI 到 PI 之間
+                if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+                // 檢查敵人是否在玩家視野內
+                if (Math.abs(angleDiff) < player.fov / 2 && dist > 0) { // dist > 0 防止自己出現在視野中
+                     // 計算敵人中心在螢幕上的 X 座標
+                    const screenX = ((player.fov / 2 - angleDiff) / player.fov) * WIDTH;
+
+                    // 修正魚眼效果 (和牆壁一樣)
+                    const correctedDistance = dist * Math.cos(angleDiff);
+                    if (correctedDistance < 1) correctedDistance = 1; // 避免除以零或負數
+
+                    // 計算敵人高度
+                    const objectHeight = ENEMY_SIZE * HEIGHT / correctedDistance;
+                    const drawY = (HEIGHT / 2) - (objectHeight / 2);
+
+                    // 計算敵人寬度 (維持比例)
+                    const objectWidth = ENEMY_SIZE * WIDTH / correctedDistance;
+
+                    objectsToDraw.push({
+                        type: 'enemy',
+                        x: screenX - objectWidth / 2, // 敵人中心對齊 screenX
+                        y: drawY,
+                        width: objectWidth,
+                        height: objectHeight,
+                        distance: correctedDistance,
+                        health: enemy.health,
+                        maxHealth: ENEMY_HEALTH
+                    });
+                }
+            });
+
+            // 繪製子彈 (如果需要可見)
+            bullets.forEach(bullet => {
+                const dx = bullet.x - player.x;
+                const dy = bullet.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const bulletAngle = Math.atan2(dy, dx);
+
+                let angleDiff = player.angle - bulletAngle;
+                if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+                if (Math.abs(angleDiff) < player.fov / 2 && dist > 0) {
+                    const screenX = ((player.fov / 2 - angleDiff) / player.fov) * WIDTH;
+                    const correctedDistance = dist * Math.cos(angleDiff);
+                    if (correctedDistance < 1) correctedDistance = 1;
+
+                    const bulletSize = BULLET_RADIUS * HEIGHT / correctedDistance;
+                    const drawY = (HEIGHT / 2) - (bulletSize / 2);
+
+                    objectsToDraw.push({
+                        type: 'bullet',
+                        x: screenX - bulletSize / 2,
+                        y: drawY,
+                        size: bulletSize,
+                        distance: correctedDistance
+                    });
+                }
+            });
+
+            // 根據距離從遠到近繪製敵人 (保證近的敵人覆蓋遠的敵人)
+            objectsToDraw.sort((a, b) => b.distance - a.distance);
+
+            objectsToDraw.forEach(obj => {
+                if (obj.type === 'enemy') {
+                    const darkness = Math.min(1, obj.distance / (TILE_SIZE * 5));
+                    const colorValue = Math.floor(255 * (1 - darkness));
+                    ctx.fillStyle = `rgb(${colorValue}, 0, 0)`; // 紅色敵人
+                    ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+
+                    // 繪製敵人生命條
+                    const healthBarWidth = obj.width * 0.8;
+                    const healthBarHeight = obj.height * 0.1;
+                    const healthRatio = obj.health / obj.maxHealth;
+
+                    ctx.fillStyle = 'black'; // 背景
+                    ctx.fillRect(obj.x + (obj.width - healthBarWidth) / 2, obj.y - healthBarHeight - 5, healthBarWidth, healthBarHeight);
+                    ctx.fillStyle = 'lime'; // 生命值
+                    ctx.fillRect(obj.x + (obj.width - healthBarWidth) / 2, obj.y - healthBarHeight - 5, healthBarWidth * healthRatio, healthBarHeight);
+                } else if (obj.type === 'bullet') {
+                    ctx.fillStyle = 'orange'; // 子彈顏色
+                    ctx.beginPath();
+                    ctx.arc(obj.x + obj.size / 2, obj.y + obj.size / 2, obj.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+
+            // 繪製 2D 小地圖
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, MINI_MAP_SIZE_X, MINI_MAP_SIZE_Y);
+
+            for (let y = 0; y < MAP_HEIGHT; y++) {
+                for (let x = 0; x < MAP_WIDTH; x++) {
+                    if (MAP[y][x] === 1) {
+                        ctx.fillStyle = 'gray';
+                        ctx.fillRect(x * TILE_SIZE * MINI_MAP_SCALE, y * TILE_SIZE * MINI_MAP_SCALE, TILE_SIZE * MINI_MAP_SCALE, TILE_SIZE * MINI_MAP_SCALE);
+                    }
+                }
+            }
+
+            // 繪製小地圖上的敵人
+            enemies.forEach(enemy => {
+                ctx.fillStyle = 'red';
+                ctx.fillRect(enemy.x * MINI_MAP_SCALE - ENEMY_SIZE * MINI_MAP_SCALE / 2, enemy.y * MINI_MAP_SCALE - ENEMY_SIZE * MINI_MAP_SCALE / 2, ENEMY_SIZE * MINI_MAP_SCALE, ENEMY_SIZE * MINI_MAP_SCALE);
+            });
+
+            // 繪製小地圖上的子彈
+            bullets.forEach(bullet => {
+                ctx.fillStyle = 'orange';
+                ctx.beginPath();
+                ctx.arc(bullet.x * MINI_MAP_SCALE, bullet.y * MINI_MAP_SCALE, BULLET_RADIUS * MINI_MAP_SCALE, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 繪製小地圖上的玩家
+            ctx.fillStyle = 'yellow';
+            ctx.fillRect(player.x * MINI_MAP_SCALE - PLAYER_ICON_SIZE / 2, player.y * MINI_MAP_SCALE - PLAYER_ICON_SIZE / 2, PLAYER_ICON_SIZE, PLAYER_ICON_SIZE);
+
+            // 繪製玩家的方向 (一條小線)
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(player.x * MINI_MAP_SCALE, player.y * MINI_MAP_SCALE);
+            ctx.lineTo((player.x + Math.cos(player.angle) * 10) * MINI_MAP_SCALE, (player.y + Math.sin(player.angle) * 10) * MINI_MAP_SCALE);
+            ctx.stroke();
+
+            ctx.lineWidth = 1; // reset line width
+        }
+
+        function gameLoop(currentTime) {
+            const deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
+
+            update(deltaTime);
+            draw();
+
+            if (!gameOver) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function resetGame() {
+            gameOver = false;
+            player.health = player.maxHealth;
+            player.lastAttackTime = 0;
+            bullets = [];
+            gameOverScreen.style.display = 'none';
+
+            generateMap();
+            spawnEnemies();
+            
+            lastFrameTime = performance.now(); // 重置時間，防止deltaTime過大
+            gameLoop(performance.now()); // 重新開始遊戲循環
+        }
+
+        // 首次啟動遊戲
+        resetGame();
+    </script>
+</body>
+</html>

@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無限地圖製作器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+            color: #1a202c;
+            user-select: none;
+            overflow: hidden;
+            display: flex;
+            flex-direction: row;
+        }
+        canvas {
+            touch-action: none;
+            cursor: crosshair;
+            background-color: #0077c2; /* 海洋背景 */
+            flex-grow: 1; /* 佔據剩餘空間 */
+        }
+        .controls-sidebar {
+            width: 300px;
+            min-width: 250px;
+            height: 100vh;
+            background-color: white;
+            padding: 1.5rem;
+            box-shadow: -4px 0 6px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            z-index: 100;
+        }
+        .controls {
+            position: static;
+            transform: none;
+            width: auto;
+            max-width: none;
+            box-shadow: none;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .control-label {
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 0.5rem;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+        input[type="range"]:hover {
+            opacity: 1;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #4299e1;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .button {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 700;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            text-align: center;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .land-button {
+            background-color: #48bb78;
+            color: white;
+        }
+        .sea-button {
+            background-color: #4299e1;
+            color: white;
+        }
+        .road-button {
+            background-color: #64748b;
+            color: white;
+        }
+        .building-button {
+            background-color: #f9a8d4;
+            color: white;
+        }
+        .clear-button, .export-button {
+            background-color: #e53e3e;
+            color: white;
+        }
+        .export-data-button {
+            background-color: #5a67d8;
+            color: white;
+        }
+        .export-image-button {
+            background-color: #38a169;
+            color: white;
+        }
+        .import-data-button {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .mode-active {
+            box-shadow: inset 0 0 0 4px #a0aec0;
+        }
+        .info-panel {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+            color: #4a5568;
+            margin-top: auto; /* 將其推到底部 */
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        .building-size-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .building-size-button {
+            padding: 0.5rem 1rem;
+            border: 2px solid transparent;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            background-color: #cbd5e0;
+            color: #4a5568;
+            font-weight: 600;
+            flex: 1;
+            text-align: center;
+        }
+        .building-size-button.active {
+            border-color: #4299e1;
+            background-color: #bee3f8;
+        }
+        .building-orientation-button {
+            padding: 0.5rem 1rem;
+            border: 2px solid transparent;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            background-color: #cbd5e0;
+            color: #4a5568;
+            font-weight: 600;
+            flex: 1;
+            text-align: center;
+        }
+        .building-orientation-button.active {
+            border-color: #4299e1;
+            background-color: #bee3f8;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 min-h-screen">
+
+<canvas id="mapCanvas"></canvas>
+
+<div class="controls-sidebar">
+    <div class="controls">
+        <h2 class="text-xl font-bold text-center mb-2">地圖工具</h2>
+        <div class="flex gap-2">
+            <button id="landButton" class="button land-button flex-1 mode-active">繪製陸地</button>
+            <button id="seaButton" class="button sea-button flex-1">繪製海洋</button>
+        </div>
+        <div class="flex gap-2 items-center justify-between">
+            <button id="roadButton" class="button road-button flex-1">繪製道路</button>
+            <button id="buildingButton" class="button building-button flex-1">放置建築</button>
+        </div>
+        <div class="control-group" id="brushSizeControls">
+            <label for="brushSize" class="control-label">筆刷大小: <span id="brushSizeValue"></span></label>
+            <input type="range" id="brushSize" name="brushSize" min="5" max="100" value="25">
+        </div>
+        <div class="control-group" id="buildingSizeControls" style="display: none;">
+            <label class="control-label">建築物大小</label>
+            <div class="building-size-group">
+                <button id="building1x1" class="building-size-button active">1x1</button>
+                <button id="building1x2" class="building-size-button">1x2</button>
+                <button id="building2x2" class="building-size-button">2x2</button>
+            </div>
+        </div>
+        <div class="control-group" id="buildingOrientationControls" style="display: none;">
+            <label class="control-label">1x2方向</label>
+            <div class="building-size-group">
+                <button id="vertical" class="building-orientation-button active">垂直</button>
+                <button id="horizontal" class="building-orientation-button">水平</button>
+            </div>
+        </div>
+        <button id="clearButton" class="button clear-button">清除地圖</button>
+        
+        <!-- 新增的匯出/匯入按鈕 -->
+        <div class="flex flex-col gap-2 mt-4 border-t pt-4">
+            <button id="exportDataButton" class="button export-data-button">匯出地圖資料</button>
+            <button id="importDataButton" class="button import-data-button">匯入地圖資料</button>
+            <button id="exportImageButton" class="button export-image-button">匯出地圖畫面</button>
+        </div>
+        <input type="file" id="importFileInput" style="display: none;" accept=".mapdata">
+    </div>
+
+    <div class="info-panel">
+        <p>💡 提示：使用滑鼠滾輪來放大/縮小，**右鍵拖曳** 或 **兩指觸控** 來移動地圖。</p>
+        <p>💡 **新增**：右鍵點擊來移除建築物。</p>
+        <p id="roadInstruction" style="display:none; color: #e53e3e; font-weight: bold;">請點擊起始點來繪製道路</p>
+    </div>
+</div>
+
+<!-- 自定義確認彈窗 -->
+<div id="clearModal" class="modal">
+    <div class="modal-content">
+        <p class="text-lg font-bold">確定要清除地圖嗎？</p>
+        <p class="mt-2 text-gray-600">此操作將無法復原。</p>
+        <div class="modal-buttons">
+            <button id="confirmClear" class="button land-button">確定</button>
+            <button id="cancelClear" class="button sea-button">取消</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    const brushSizeSlider = document.getElementById('brushSize');
+    const brushSizeValueSpan = document.getElementById('brushSizeValue');
+    const brushSizeControls = document.getElementById('brushSizeControls');
+    const landButton = document.getElementById('landButton');
+    const seaButton = document.getElementById('seaButton');
+    const roadButton = document.getElementById('roadButton');
+    const buildingButton = document.getElementById('buildingButton');
+    const clearButton = document.getElementById('clearButton');
+    const clearModal = document.getElementById('clearModal');
+    const confirmClearBtn = document.getElementById('confirmClear');
+    const cancelClearBtn = document.getElementById('cancelClear');
+    const buildingSizeControls = document.getElementById('buildingSizeControls');
+    const building1x1Btn = document.getElementById('building1x1');
+    const building1x2Btn = document.getElementById('building1x2');
+    const building2x2Btn = document.getElementById('building2x2');
+    const buildingOrientationControls = document.getElementById('buildingOrientationControls');
+    const verticalBtn = document.getElementById('vertical');
+    const horizontalBtn = document.getElementById('horizontal');
+    const roadInstruction = document.getElementById('roadInstruction');
+    const exportDataButton = document.getElementById('exportDataButton');
+    const importDataButton = document.getElementById('importDataButton');
+    const exportImageButton = document.getElementById('exportImageButton');
+    const importFileInput = document.getElementById('importFileInput');
+
+
+    // 畫布尺寸
+    const setCanvasSize = () => {
+        canvas.width = window.innerWidth - 300; // 減去側邊欄寬度
+        canvas.height = window.innerHeight;
+    };
+    setCanvasSize();
+
+    // 畫布狀態
+    let isDrawing = false;
+    let isPanning = false;
+    let mode = 'land'; // 'land', 'sea', 'road', 'building'
+    let buildingSize = { width: 1, height: 1 };
+    let buildingOrientation = 'vertical'; // 'vertical' or 'horizontal'
+    let brushSize = parseInt(brushSizeSlider.value);
+    let panX = 0;
+    let panY = 0;
+    let scale = 1;
+    let lastX, lastY;
+
+    // 道路繪製狀態
+    let roadStartPoint = null;
+    let tempRoadEndPoint = null;
+
+    // 地圖資料 (使用一個稀疏 Map 來儲存像素方格狀態，節省記憶體)
+    const mapData = new Map();
+    // 單獨儲存建築物，以便整體繪製和管理
+    let buildings = [];
+    const cellSize = 10;
+
+    // 顏色
+    const landColor = '#48bb78'; // 陸地顏色
+    const seaColor = '#0077c2'; // 海洋顏色
+    const roadColor = '#64748b'; // 道路顏色
+    const buildingColor = '#f9a8d4'; // 建築物顏色
+    const buildingBorderColor = '#9d2a71'; // 建築物邊框顏色
+    const buildingBorderWidth = 1;
+
+    // 更新筆刷大小顯示
+    const updateBrushSizeDisplay = () => {
+        brushSizeValueSpan.textContent = brushSizeSlider.value;
+    };
+    brushSizeSlider.addEventListener('input', (e) => {
+        brushSize = parseInt(e.target.value);
+        updateBrushSizeDisplay();
+    });
+    updateBrushSizeDisplay();
+
+    // 切換模式
+    const setMode = (newMode) => {
+        mode = newMode;
+        document.querySelectorAll('.button').forEach(btn => btn.classList.remove('mode-active'));
+        document.getElementById(`${newMode}Button`).classList.add('mode-active');
+        canvas.style.cursor = 'crosshair';
+
+        // 隱藏所有額外的控制項
+        brushSizeControls.style.display = 'none';
+        buildingSizeControls.style.display = 'none';
+        buildingOrientationControls.style.display = 'none';
+        roadInstruction.style.display = 'none';
+        roadStartPoint = null; // 切換模式時清除道路起始點
+
+        // 顯示對應模式的控制項
+        if (mode === 'land' || mode === 'sea') {
+            brushSizeControls.style.display = 'flex';
+        } else if (mode === 'building') {
+            buildingSizeControls.style.display = 'flex';
+            if (buildingSize.width === 1 && buildingSize.height === 2 || buildingSize.width === 2 && buildingSize.height === 1) {
+                buildingOrientationControls.style.display = 'flex';
+            }
+        } else if (mode === 'road') {
+            roadInstruction.style.display = 'block';
+        }
+    };
+
+    landButton.addEventListener('click', () => setMode('land'));
+    seaButton.addEventListener('click', () => setMode('sea'));
+    roadButton.addEventListener('click', () => setMode('road'));
+    buildingButton.addEventListener('click', () => setMode('building'));
+    
+    // 設定建築物大小
+    const setBuildingSize = (width, height) => {
+        buildingSize = { width, height };
+        document.querySelectorAll('.building-size-button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`building${width}x${height}`).classList.add('active');
+
+        // 顯示或隱藏方向控制項
+        if (width === 1 && height === 2) {
+            buildingOrientationControls.style.display = 'flex';
+            buildingSize = (buildingOrientation === 'vertical') ? { width: 1, height: 2 } : { width: 2, height: 1 };
+        } else {
+            buildingOrientationControls.style.display = 'none';
+        }
+    };
+    building1x1Btn.addEventListener('click', () => setBuildingSize(1, 1));
+    building1x2Btn.addEventListener('click', () => setBuildingSize(1, 2));
+    building2x2Btn.addEventListener('click', () => setBuildingSize(2, 2));
+
+    // 設定建築物方向 (僅適用於 1x2)
+    const setBuildingOrientation = (orientation) => {
+        buildingOrientation = orientation;
+        document.querySelectorAll('.building-orientation-button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(orientation).classList.add('active');
+        
+        // 根據方向更新 buildingSize
+        if (orientation === 'vertical') {
+            buildingSize = { width: 1, height: 2 };
+        } else {
+            buildingSize = { width: 2, height: 1 };
+        }
+    };
+    verticalBtn.addEventListener('click', () => setBuildingOrientation('vertical'));
+    horizontalBtn.addEventListener('click', () => setBuildingOrientation('horizontal'));
+
+    // 清除地圖彈窗
+    clearButton.addEventListener('click', () => {
+        clearModal.style.display = 'flex';
+    });
+
+    confirmClearBtn.addEventListener('click', () => {
+        mapData.clear();
+        buildings = [];
+        clearModal.style.display = 'none';
+        draw();
+    });
+
+    cancelClearBtn.addEventListener('click', () => {
+        clearModal.style.display = 'none';
+    });
+
+    // 繪製多個像素
+    const applyPixelBrush = (x, y, value) => {
+        const radius = brushSize / scale;
+        const cellRadius = Math.ceil(radius / cellSize);
+        
+        const centerX = Math.floor(x / cellSize);
+        const centerY = Math.floor(y / cellSize);
+
+        for (let i = centerX - cellRadius; i <= centerX + cellRadius; i++) {
+            for (let j = centerY - cellRadius; j <= centerY + cellRadius; j++) {
+                const dist = Math.sqrt(Math.pow(i * cellSize - x, 2) + Math.pow(j * cellSize - y, 2));
+                if (dist <= radius) {
+                    const key = `${i},${j}`;
+                    if (value === 'sea') {
+                        mapData.delete(key);
+                    } else {
+                        mapData.set(key, value);
+                    }
+                }
+            }
+        }
+    };
+
+    // 繪製單個像素
+    const applySinglePixel = (x, y, value) => {
+        const cellX = Math.floor(x / cellSize);
+        const cellY = Math.floor(y / cellSize);
+        const key = `${cellX},${cellY}`;
+        if (value === 'sea') {
+            mapData.delete(key);
+        } else {
+            mapData.set(key, value);
+        }
+    };
+    
+    // 繪製建築物（多個像素）
+    const applyBuilding = (x, y) => {
+        const cellX = Math.floor(x / cellSize);
+        const cellY = Math.floor(y / cellSize);
+
+        const newBuilding = {
+            x: cellX,
+            y: cellY,
+            width: buildingSize.width,
+            height: buildingSize.height,
+        };
+
+        // 檢查新建築物是否與現有建築物重疊
+        for (const existingBuilding of buildings) {
+            if (
+                cellX < existingBuilding.x + existingBuilding.width &&
+                cellX + newBuilding.width > existingBuilding.x &&
+                cellY < existingBuilding.y + existingBuilding.height &&
+                cellY + newBuilding.height > existingBuilding.y
+            ) {
+                // 如果重疊，則不放置新建築物
+                return;
+            }
+        }
+        
+        // 檢查新建築物是否與道路重疊 (簡單檢查四個角點)
+        if (mapData.get(`${cellX},${cellY}`) === 'road' ||
+            mapData.get(`${cellX + newBuilding.width - 1},${cellY}`) === 'road' ||
+            mapData.get(`${cellX},${cellY + newBuilding.height - 1}`) === 'road' ||
+            mapData.get(`${cellX + newBuilding.width - 1},${cellY + newBuilding.height - 1}`) === 'road') {
+            return;
+        }
+
+        buildings.push(newBuilding);
+    };
+
+    // 繪製直線道路
+    const drawRoadLine = (startPoint, endPoint) => {
+        const dx = Math.abs(endPoint.x - startPoint.x);
+        const dy = Math.abs(endPoint.y - startPoint.y);
+        const steps = Math.max(dx, dy);
+
+        for (let i = 0; i <= steps; i++) {
+            const x = Math.floor(startPoint.x + (endPoint.x - startPoint.x) * i / steps);
+            const y = Math.floor(startPoint.y + (endPoint.y - startPoint.y) * i / steps);
+            mapData.set(`${x},${y}`, 'road');
+        }
+    };
+
+    // 繪製地圖
+    const draw = () => {
+        // 清空畫布
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 繪製背景 (海洋)
+        ctx.fillStyle = seaColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 繪製所有地圖元素 (陸地和道路)
+        mapData.forEach((value, key) => {
+            const [cellX, cellY] = key.split(',').map(Number);
+            const x = cellX * cellSize * scale + panX;
+            const y = cellY * cellSize * scale + panY;
+            const size = cellSize * scale;
+            
+            // 只繪製在視窗內的可見部分，提升效能
+            if (x + size > 0 && y + size > 0 && x < canvas.width && y < canvas.height) {
+                switch (value) {
+                    case 'land':
+                        ctx.fillStyle = landColor;
+                        ctx.fillRect(x, y, size, size);
+                        break;
+                    case 'road':
+                        ctx.fillStyle = roadColor;
+                        ctx.fillRect(x, y, size, size);
+                        break;
+                }
+            }
+        });
+
+        // 獨立繪製所有建築物
+        buildings.forEach(building => {
+            const x = building.x * cellSize * scale + panX;
+            const y = building.y * cellSize * scale + panY;
+            const width = building.width * cellSize * scale;
+            const height = building.height * cellSize * scale;
+
+            // 只繪製在視窗內的可見部分
+            if (x + width > 0 && y + height > 0 && x < canvas.width && y < canvas.height) {
+                // 繪製內部
+                ctx.fillStyle = buildingColor;
+                ctx.fillRect(x, y, width, height);
+
+                // 繪製外部邊框
+                ctx.fillStyle = buildingBorderColor;
+                // top
+                ctx.fillRect(x, y, width, buildingBorderWidth * scale);
+                // bottom
+                ctx.fillRect(x, y + height - buildingBorderWidth * scale, width, buildingBorderWidth * scale);
+                // left
+                ctx.fillRect(x, y, buildingBorderWidth * scale, height);
+                // right
+                ctx.fillRect(x + width - buildingBorderWidth * scale, y, buildingBorderWidth * scale, height);
+            }
+        });
+
+        // 繪製道路預覽線
+        if (mode === 'road' && roadStartPoint) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#f0a300';
+            ctx.lineWidth = cellSize * scale * 0.5;
+            ctx.lineCap = 'round';
+            ctx.moveTo(roadStartPoint.x * cellSize * scale + panX, roadStartPoint.y * cellSize * scale + panY);
+            if (tempRoadEndPoint) {
+                ctx.lineTo(tempRoadEndPoint.x * cellSize * scale + panX, tempRoadEndPoint.y * cellSize * scale + panY);
+            }
+            ctx.stroke();
+        }
+    };
+    
+    // 渲染迴圈，優化繪圖頻率
+    const gameLoop = () => {
+        draw();
+        requestAnimationFrame(gameLoop);
+    };
+    gameLoop();
+
+    // 移除建築物
+    const removeBuilding = (mapX, mapY) => {
+        const cellX = Math.floor(mapX / cellSize);
+        const cellY = Math.floor(mapY / cellSize);
+        
+        // 找到點擊的建築物
+        const indexToRemove = buildings.findIndex(building => {
+            return cellX >= building.x && cellX < building.x + building.width &&
+                   cellY >= building.y && cellY < building.y + building.height;
+        });
+
+        if (indexToRemove !== -1) {
+            buildings.splice(indexToRemove, 1);
+        }
+    };
+
+    // 匯出地圖資料
+    const exportMapData = () => {
+        const data = {
+            mapData: Array.from(mapData.entries()),
+            buildings: buildings,
+        };
+        const jsonString = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonString], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'map.mapdata';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    // 匯入地圖資料
+    const importMapData = (file) => {
+        if (!file) {
+            console.error("沒有選擇檔案。");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+
+                // 清空當前地圖
+                mapData.clear();
+                buildings = [];
+
+                // 載入新的地圖資料
+                if (data.mapData) {
+                    data.mapData.forEach(item => {
+                        mapData.set(item[0], item[1]);
+                    });
+                }
+                if (data.buildings) {
+                    buildings = data.buildings;
+                }
+
+                draw(); // 重新繪製地圖
+            } catch (error) {
+                console.error("讀取檔案失敗：", error);
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    // 匯出地圖畫面
+    const exportMapImage = () => {
+        const dataURL = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = dataURL;
+        a.download = 'map.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+
+    // 滑鼠事件監聽器
+    canvas.addEventListener('mousedown', (e) => {
+        // 阻止右鍵菜單
+        if (e.button === 2) e.preventDefault();
+
+        const rect = canvas.getBoundingClientRect();
+        const mapX = (e.clientX - rect.left - panX) / scale;
+        const mapY = (e.clientY - rect.top - panY) / scale;
+        const cellX = Math.floor(mapX / cellSize);
+        const cellY = Math.floor(mapY / cellSize);
+
+        // 左鍵繪製/放置
+        if (e.button === 0) {
+            isDrawing = true;
+            
+            if (mode === 'land' || mode === 'sea') {
+                applyPixelBrush(mapX, mapY, mode);
+            } else if (mode === 'building') {
+                applyBuilding(mapX, mapY);
+            } else if (mode === 'road') {
+                if (!roadStartPoint) {
+                    roadStartPoint = { x: cellX, y: cellY };
+                    roadInstruction.textContent = '請點擊結束點來完成道路';
+                } else {
+                    drawRoadLine(roadStartPoint, { x: cellX, y: cellY });
+                    roadStartPoint = null;
+                    tempRoadEndPoint = null;
+                    roadInstruction.textContent = '道路已繪製。再次點擊以開始新道路。';
+                }
+            }
+        } 
+        // 右鍵平移或移除建築物
+        else if (e.button === 2) {
+            if (mode === 'building') {
+                removeBuilding(mapX, mapY);
+            } else {
+                isPanning = true;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                canvas.style.cursor = 'grab';
+            }
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mapX = (e.clientX - rect.left - panX) / scale;
+        const mapY = (e.clientY - rect.top - panY) / scale;
+        
+        // 平移模式
+        if (isPanning) {
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            panX += dx;
+            panY += dy;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        } 
+        // 繪製模式
+        else if (isDrawing) {
+            if (mode === 'land' || mode === 'sea') {
+                applyPixelBrush(mapX, mapY, mode);
+            }
+        } else if (mode === 'road' && roadStartPoint) {
+            const cellX = Math.floor(mapX / cellSize);
+            const cellY = Math.floor(mapY / cellSize);
+            tempRoadEndPoint = { x: cellX, y: cellY };
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        isDrawing = false;
+        isPanning = false;
+        canvas.style.cursor = 'crosshair';
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        isDrawing = false;
+        isPanning = false;
+        canvas.style.cursor = 'crosshair';
+    });
+
+    // 禁止右鍵菜單
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // 觸控事件監聽器
+    let touchPoints = [];
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        touchPoints = Array.from(e.touches);
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const mapX = (touch.clientX - rect.left - panX) / scale;
+        const mapY = (touch.clientY - rect.top - panY) / scale;
+        const cellX = Math.floor(mapX / cellSize);
+        const cellY = Math.floor(mapY / cellSize);
+
+
+        if (e.touches.length === 1) {
+            isDrawing = true;
+            
+            if (mode === 'land' || mode === 'sea') {
+                applyPixelBrush(mapX, mapY, mode);
+            } else if (mode === 'building') {
+                applyBuilding(mapX, mapY);
+            } else if (mode === 'road') {
+                if (!roadStartPoint) {
+                    roadStartPoint = { x: cellX, y: cellY };
+                    roadInstruction.textContent = '請點擊結束點來完成道路';
+                } else {
+                    drawRoadLine(roadStartPoint, { x: cellX, y: cellY });
+                    roadStartPoint = null;
+                    tempRoadEndPoint = null;
+                    roadInstruction.textContent = '道路已繪製。再次點擊以開始新道路。';
+                }
+            }
+        } else if (e.touches.length === 2) {
+            isPanning = true;
+        }
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const currentTouchPoints = Array.from(e.touches);
+        const rect = canvas.getBoundingClientRect();
+        
+        if (touchPoints.length === 2 && currentTouchPoints.length === 2) {
+            // 雙指平移與縮放
+            const touch1 = currentTouchPoints[0];
+            const touch2 = currentTouchPoints[1];
+            const prevTouch1 = touchPoints[0];
+            const prevTouch2 = touchPoints[1];
+
+            // 縮放
+            const dist = Math.sqrt(Math.pow(touch2.clientX - touch1.clientX, 2) + Math.pow(touch2.clientY - touch1.clientY, 2));
+            const prevDist = Math.sqrt(Math.pow(prevTouch2.clientX - prevTouch1.clientX, 2) + Math.pow(prevTouch2.clientY - prevTouch1.clientY, 2));
+            if (prevDist > 0) {
+                const scaleFactor = dist / prevDist;
+                scale *= scaleFactor;
+            }
+
+            // 平移
+            const midX = (touch1.clientX + touch2.clientX) / 2;
+            const midY = (touch1.clientY + touch2.clientY) / 2;
+            const prevMidX = (prevTouch1.clientX + prevTouch2.clientX) / 2;
+            const prevMidY = (prevTouch1.clientY + prevTouch2.clientY) / 2;
+            panX += midX - prevMidX;
+            panY += midY - prevMidY;
+
+        } else if (isDrawing && currentTouchPoints.length === 1) {
+            // 單指繪製
+            const mapX = (e.touches[0].clientX - rect.left - panX) / scale;
+            const mapY = (e.touches[0].clientY - rect.top - panY) / scale;
+
+            if (mode === 'land' || mode === 'sea') {
+                applyPixelBrush(mapX, mapY, mode);
+            }
+        }
+        touchPoints = currentTouchPoints;
+    });
+
+    canvas.addEventListener('touchend', () => {
+        isDrawing = false;
+        isPanning = false;
+        touchPoints = [];
+    });
+
+    // 滾輪縮放
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const scaleFactor = 1.1;
+        const oldScale = scale;
+
+        if (e.deltaY < 0) { // 放大
+            scale *= scaleFactor;
+        } else { // 縮小
+            scale /= scaleFactor;
+        }
+
+        // 保持縮放中心
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const dx = mouseX - panX;
+        const dy = mouseY - panY;
+
+        panX = mouseX - dx * (scale / oldScale);
+        panY = mouseY - dy * (scale / oldScale);
+    });
+
+    // 視窗大小改變時調整畫布大小
+    window.addEventListener('resize', () => {
+        setCanvasSize();
+    });
+    
+    // 匯出按鈕事件監聽器
+    exportDataButton.addEventListener('click', exportMapData);
+    exportImageButton.addEventListener('click', exportMapImage);
+
+    // 匯入按鈕事件監聽器
+    importDataButton.addEventListener('click', () => {
+        importFileInput.click();
+    });
+
+    importFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            importMapData(file);
+        }
+    });
+
+    // 初始設定
+    setMode('land');
+    setBuildingSize(1, 1);
+</script>
+</body>
+</html>

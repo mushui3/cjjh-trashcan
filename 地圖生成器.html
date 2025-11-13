@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>柏林雜訊行星地表生成器</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #e3f2fd;
+            color: #2c3e50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+            padding: 30px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            border: 1px solid #bbdefb;
+            text-align: center;
+        }
+        h1 {
+            color: #1976d2;
+            margin-bottom: 5px;
+        }
+        .subtitle {
+            font-size: 1.1em;
+            color: #616161;
+            margin-bottom: 25px;
+        }
+        canvas {
+            border: 2px solid #e0f2f1;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-width: 100%; /* Ensures the canvas is responsive */
+            height: auto;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+            width: 100%;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            text-align: left;
+            flex: 1 1 150px;
+        }
+        .input-row {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+        .input-row .input-group {
+            flex: 1;
+        }
+        label {
+            font-weight: bold;
+            color: #37474f;
+            margin-bottom: 5px;
+        }
+        input[type="number"], input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border: 2px solid #e0f2f1;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 1em;
+            color: #009688;
+            transition: border-color 0.3s;
+        }
+        input[type="number"]:focus, input[type="range"]:focus {
+            outline: none;
+            border-color: #009688;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: background-color 0.3s, transform 0.2s;
+            margin-top: 20px;
+        }
+        button:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+        }
+        .info {
+            margin-top: 30px;
+            font-style: italic;
+            color: #78909c;
+            line-height: 1.6;
+            border-top: 1px dashed #cfd8dc;
+            padding-top: 15px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>柏林雜訊行星地表生成器</h1>
+        <p class="subtitle">此模型利用柏林雜訊生成逼真的行星地表圖。</p>
+
+        <canvas id="noiseCanvas" width="1000" height="500"></canvas>
+        
+        <div class="controls">
+            <div class="input-group">
+                <label for="scale">規模 (Scale):</label>
+                <input type="number" id="scale" min="1" value="100" step="1">
+            </div>
+            <div class="input-group">
+                <label for="octaves">疊代 (Octaves):</label>
+                <input type="number" id="octaves" min="1" max="10" value="4" step="1">
+            </div>
+            <div class="input-group">
+                <label for="seedInput">種子碼 (Seed):</label>
+                <input type="number" id="seedInput" value="12345">
+            </div>
+            <div class="input-group">
+                <label for="seaLevel">海平面高度 (Sea Level):</label>
+                <input type="range" id="seaLevel" min="0.0" max="1.0" value="0.5" step="0.01">
+            </div>
+            <div class="input-group">
+                <label for="iceRatio">極地冰川 (%):</label>
+                <input type="range" id="iceRatio" min="0" max="50" value="5" step="1">
+            </div>
+            <div class="input-group">
+                <label for="landDistribution">陸地分佈 (%):</label>
+                <input type="range" id="landDistribution" min="0" max="20" value="5" step="1">
+            </div>
+             <div class="input-group">
+                <label for="ridgeScale">山脊規模:</label>
+                <input type="number" id="ridgeScale" min="1" max="500" value="150" step="1">
+            </div>
+            <div class="input-group">
+                <label for="ridgeStrength">山脊強度:</label>
+                <input type="range" id="ridgeStrength" min="0.0" max="1.0" value="0.3" step="0.01">
+            </div>
+        </div>
+        
+        <button id="generateBtn">生成地圖</button>
+
+        <div class="info">
+            **說明:** 此地圖根據以下規則著色：<br>
+            - **顏色漸層:** 地圖顏色會依據地形高度平滑過渡，但水陸交界處保持清晰。<br>
+            - **深海 → 淺海:** 從深藍過渡到淺藍。<br>
+            - **陸地:** 從沙灘、草地到雪山，顏色平滑過渡。<br>
+            - **極地冰蓋:** 當位於極地地區時，陸地上的冰層會是連貫的；**海面上的冰則會顯示為隨機分佈、帶有透明感的碎冰，看起來更像冰霧**。<br>
+            <br>
+            **新增說明:**<br>
+            - **山脊規模:** 控制山脈的寬度和頻率，數值越大，山脈越寬闊且綿延。<br>
+            - **山脊強度:** 決定山脈的顯著性，數值越高，山脈看起來會越陡峭、越突出。<br>
+            - **種子碼:** 任何數字都可以作為地圖生成的起始點，相同的種子碼將產生相同的地圖。
+            - **海平面高度:** 精確控制水陸比例，數值從 0 (陸地行星) 到 1 (海洋行星)。
+            - **極地冰川:** 決定行星兩極冰川的覆蓋範圍，邊界將根據地形高度動態生成。
+            - **陸地分佈:** 調整地貌的集中程度。較低數值會產生分散的群島，較高數值則會產生一個單一的超大陸或多個大型陸塊。
+            - **隨機偏移:** 大陸位置現在會隨機生成，讓每次生成的地圖都獨一無二。
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('noiseCanvas');
+        const ctx = canvas.getContext('2d');
+        const generateBtn = document.getElementById('generateBtn');
+        const scaleInput = document.getElementById('scale');
+        const octavesInput = document.getElementById('octaves');
+        const seedInput = document.getElementById('seedInput');
+        const seaLevelInput = document.getElementById('seaLevel');
+        const iceRatioInput = document.getElementById('iceRatio');
+        const landDistributionInput = document.getElementById('landDistribution');
+        const ridgeScaleInput = document.getElementById('ridgeScale');
+        const ridgeStrengthInput = document.getElementById('ridgeStrength');
+
+        // A simple seeded random number generator for repeatable noise
+        let currentSeed = 12345;
+        function seededRandom() {
+            const a = 9301;
+            const c = 49297;
+            const m = 233280;
+            currentSeed = (currentSeed * a + c) % m;
+            return currentSeed / m;
+        }
+
+        // Main function to generate and draw the map
+        function generateAndDrawMap() {
+            const width = canvas.width;
+            const height = canvas.height;
+            const scale = parseFloat(scaleInput.value);
+            const octaves = parseInt(octavesInput.value, 10);
+            const seed = parseInt(seedInput.value, 10);
+            const seaLevel = parseFloat(seaLevelInput.value);
+            const iceRatio = parseFloat(iceRatioInput.value) / 100;
+            const landDistribution = parseFloat(landDistributionInput.value) / 100;
+            const ridgeScale = parseFloat(ridgeScaleInput.value);
+            const ridgeStrength = parseFloat(ridgeStrengthInput.value);
+
+            if (isNaN(scale) || isNaN(octaves) || isNaN(seed) || isNaN(seaLevel) || isNaN(iceRatio) || isNaN(landDistribution) || isNaN(ridgeScale) || isNaN(ridgeStrength) || scale <= 0 || octaves <= 0) {
+                return;
+            }
+
+            // Set the seed for repeatable generation
+            currentSeed = seed;
+
+            // Generate a random offset for the continental map
+            const offsetX1 = Math.floor(seededRandom() * 10000) - 5000;
+            const offsetY1 = Math.floor(seededRandom() * 10000) - 5000;
+            
+            const offsetX2 = Math.floor(seededRandom() * 10000) - 5000;
+            const offsetY2 = Math.floor(seededRandom() * 10000) - 5000;
+
+            // Generate the main terrain noise map
+            const terrainNoiseMap = generateNoiseMap(width, height, scale, octaves, 0, 0);
+            
+            // Generate two low-frequency continental noise maps with random offsets
+            currentSeed = seed + 1; // Use a different seed for a different pattern
+            const continentalNoiseMap1 = generateNoiseMap(width, height, scale * 3, 2, offsetX1, offsetY1);
+            
+            currentSeed = seed + 2; // Another seed for a second continental map
+            const continentalNoiseMap2 = generateNoiseMap(width, height, scale * 4, 2, offsetX2, offsetY2);
+
+            // Generate a new, higher-frequency noise map specifically for ridges
+            currentSeed = seed + 3;
+            const ridgeNoiseMap = generateNoiseMap(width, height, ridgeScale, 2, 0, 0);
+
+            // Generate a high-frequency noise map for fragmented ice
+            currentSeed = seed + 4;
+            const iceFragmentNoise = generateNoiseMap(width, height, scale * 0.1, 1, 0, 0);
+
+            drawMap(terrainNoiseMap, continentalNoiseMap1, continentalNoiseMap2, ridgeNoiseMap, iceFragmentNoise, width, height, seaLevel, iceRatio, landDistribution, ridgeStrength);
+        }
+
+        // The core Perlin noise generation
+        function generateNoiseMap(width, height, scale, octaves, offsetX = 0, offsetY = 0) {
+            const noise = new Array(width * height);
+            const permutation = new Array(512);
+
+            // Initialize the permutation table using the seeded random function
+            for(let i = 0; i < 256; i++) {
+                permutation[i] = permutation[i + 256] = Math.floor(seededRandom() * 256);
+            }
+            
+            function grad2d(hash, x, y) {
+                const h = hash & 15;
+                const u = h < 8 ? x : y;
+                const v = h < 4 ? y : (h === 12 || h === 14) ? x : 0;
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+
+            function lerp(a, b, x) {
+                return a + x * (b - a);
+            }
+
+            function fade(t) {
+                return t * t * t * (t * (t * 6 - 15) + 10);
+            }
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let total = 0;
+                    let freq = 1;
+                    let amp = 1;
+                    let maxValue = 0;
+
+                    for (let i = 0; i < octaves; i++) {
+                        // Apply offset to the coordinates
+                        const nx = (x + offsetX) / scale * freq;
+                        const ny = (y + offsetY) / scale * freq;
+
+                        const x0 = Math.floor(nx) & 255;
+                        const y0 = Math.floor(ny) & 255;
+                        const x1 = (x0 + 1) & 255;
+                        const y1 = (y0 + 1) & 255;
+
+                        const fx = fade(nx - Math.floor(nx));
+                        const fy = fade(ny - Math.floor(ny));
+
+                        const g00 = grad2d(permutation[x0 + permutation[y0]], nx - x0, ny - y0);
+                        const g10 = grad2d(permutation[x1 + permutation[y0]], nx - x1, ny - y0);
+                        const g01 = grad2d(permutation[x0 + permutation[y1]], nx - x0, ny - y1);
+                        const g11 = grad2d(permutation[x1 + permutation[y1]], nx - x1, ny - y1);
+
+                        const noiseX0 = lerp(g00, g10, fx);
+                        const noiseX1 = lerp(g01, g11, fx);
+                        const finalNoise = lerp(noiseX0, noiseX1, fy);
+
+                        total += finalNoise * amp;
+                        maxValue += amp;
+                        amp *= 0.5; // Halve the amplitude for each octave
+                        freq *= 2;  // Double the frequency for each octave
+                    }
+
+                    noise[y * width + x] = total / maxValue;
+                }
+            }
+            return noise;
+        }
+        
+        // Draw the noise map on the canvas
+        function drawMap(terrainNoiseMap, continentalNoiseMap1, continentalNoiseMap2, ridgeNoiseMap, iceFragmentNoise, width, height, seaLevel, iceRatio, landDistribution, ridgeStrength) {
+            const imageData = ctx.createImageData(width, height);
+            const data = imageData.data;
+            
+            // Apply a non-linear transform to the landDistribution value for smoother control
+            const adjustedLandDistribution = landDistribution * landDistribution;
+
+            // Define color stops for water and land separately
+            const waterColorStops = [
+                { h: 0.0, color: [0, 20, 100] },
+                { h: 0.3, color: [0, 80, 200] },
+                { h: 1.0, color: [0, 102, 204] },
+            ];
+
+            const landColorStops = [
+                { h: 0.0, color: [204, 178, 127] }, // Beach/lowlands
+                { h: 0.2, color: [0, 102, 0] },     // Grasslands
+                { h: 0.7, color: [102, 102, 102] },  // Hills/mountains
+                { h: 1.0, color: [255, 255, 255] },    // Snow
+            ];
+
+            // A helper function to linearly interpolate between two colors
+            function lerpColor(colorStops, h) {
+                let startColor, endColor, t;
+                for (let j = 0; j < colorStops.length - 1; j++) {
+                    const stop1 = colorStops[j];
+                    const stop2 = colorStops[j + 1];
+                    if (h >= stop1.h && h <= stop2.h) {
+                        t = (h - stop1.h) / (stop2.h - stop1.h);
+                        return [
+                            stop1.color[0] + (stop2.color[0] - stop1.color[0]) * t,
+                            stop1.color[1] + (stop2.color[1] - stop1.color[1]) * t,
+                            stop1.color[2] + (stop2.color[2] - stop1.color[2]) * t,
+                        ];
+                    }
+                }
+                return colorStops[colorStops.length - 1].color;
+            }
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    
+                    // Normalize all noise maps to [0, 1]
+                    const terrainHeight = (terrainNoiseMap[y * width + x] + 1) / 2;
+                    const continentalHeight1 = (continentalNoiseMap1[y * width + x] + 1) / 2;
+                    const continentalHeight2 = (continentalNoiseMap2[y * width + x] + 1) / 2;
+                    
+                    const combinedContinentalHeight = (continentalHeight1 + continentalHeight2) / 2;
+                    
+                    // Use the absolute value of the ridge noise to create sharp peaks and valleys
+                    const ridgeHeight = Math.abs(ridgeNoiseMap[y * width + x]);
+
+                    // Combine the base terrain, continental drift, and ridge layers
+                    let h = terrainHeight * (1 - adjustedLandDistribution) + combinedContinentalHeight * adjustedLandDistribution;
+                    h = Math.max(0, h + ridgeHeight * ridgeStrength);
+
+                    let r, g, b;
+
+                    // Calculate dynamic polar boundary using a combination of latitude and noise
+                    const yNormalized = y / height;
+                    const yFromEquator = Math.abs(yNormalized - 0.5) * 2; 
+                    const polarThreshold = 1.0 - iceRatio;
+                    // Blend the fixed latitude with a noise value for a wavy, organic boundary
+                    const dynamicIceBoundary = polarThreshold - (iceFragmentNoise[y * width + x] * 0.5); 
+
+                    // Check for polar regions first
+                    if (yFromEquator > dynamicIceBoundary) {
+                         // Polar region
+                        if (h > seaLevel) {
+                            // On land in polar region: continuous ice
+                            [r, g, b] = [255, 255, 255];
+                        } else {
+                            // On water in polar region: fragmented ice, using color interpolation
+                            const normalizedWaterHeight = h / seaLevel;
+                            const baseWaterColor = lerpColor(waterColorStops, normalizedWaterHeight);
+                            
+                            // Use a high-frequency noise value to create the "misty" effect
+                            const iceFragment = (iceFragmentNoise[y * width + x] + 1) / 2;
+                            
+                            // Interpolate between the base water color and white based on the noise value
+                            const blendedColor = [
+                                baseWaterColor[0] + (255 - baseWaterColor[0]) * iceFragment,
+                                baseWaterColor[1] + (255 - baseWaterColor[1]) * iceFragment,
+                                baseWaterColor[2] + (255 - baseWaterColor[2]) * iceFragment,
+                            ];
+                            [r, g, b] = blendedColor;
+                        }
+                    } else {
+                        // Non-polar region
+                        if (h < seaLevel) {
+                            // Water
+                            const normalizedWaterHeight = h / seaLevel;
+                            [r, g, b] = lerpColor(waterColorStops, normalizedWaterHeight);
+                        } else {
+                            // Land
+                            const normalizedLandHeight = (h - seaLevel) / (1 - seaLevel);
+                            [r, g, b] = lerpColor(landColorStops, normalizedLandHeight);
+                        }
+                    }
+
+                    data[i] = r;
+                    data[i + 1] = g;
+                    data[i + 2] = b;
+                    data[i + 3] = 255; // Alpha channel
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        // Event listeners
+        generateBtn.addEventListener('click', generateAndDrawMap);
+        scaleInput.addEventListener('input', generateAndDrawMap);
+        octavesInput.addEventListener('input', generateAndDrawMap);
+        seedInput.addEventListener('input', generateAndDrawMap);
+        seaLevelInput.addEventListener('input', generateAndDrawMap);
+        iceRatioInput.addEventListener('input', generateAndDrawMap);
+        landDistributionInput.addEventListener('input', generateAndDrawMap);
+        ridgeScaleInput.addEventListener('input', generateAndDrawMap);
+        ridgeStrengthInput.addEventListener('input', generateAndDrawMap);
+        
+        // Initial map generation on load
+        window.onload = function() {
+            generateAndDrawMap();
+        };
+
+    </script>
+</body>
+</html>

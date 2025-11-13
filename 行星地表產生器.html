@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 行星地表產生器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        canvas {
+            border: 2px solid #30363d;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 20px;
+            background-color: #161b22;
+            border-radius: 12px;
+            border: 1px solid #30363d;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        input[type="range"], input[type="text"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #30363d;
+            border-radius: 5px;
+            outline: none;
+            transition: opacity .2s;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #58a6ff;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #58a6ff;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type="text"] {
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            padding: 8px;
+            border-radius: 6px;
+            color: #c9d1d9;
+        }
+        button {
+            background-color: #21262d;
+            color: #c9d1d9;
+            padding: 10px 15px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s, border-color 0.3s;
+        }
+        button:hover {
+            background-color: #30363d;
+            border-color: #444c56;
+        }
+        .hint {
+            font-size: 12px;
+            color: #8b949e;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="flex flex-col md:flex-row md:items-start md:justify-center gap-8 w-full max-w-7xl">
+    <div class="controls w-full md:w-1/3">
+        <p class="hint">使用滑鼠拖曳或方向鍵移動</p>
+        <div class="control-group">
+            <label for="seedInput">種子 (Seed)</label>
+            <input type="text" id="seedInput" value="seed_1234">
+        </div>
+        
+        <div class="control-group">
+            <label for="zoomSlider">縮放 (Zoom): <span id="zoomValue">1.00</span></label>
+            <input type="range" id="zoomSlider" min="0.2" max="2.0" step="0.01" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <label for="frequencySlider">基礎頻率 (Base Frequency): <span id="frequencyValue">0.010</span></label>
+            <input type="range" id="frequencySlider" min="0.005" max="0.05" step="0.001" value="0.010">
+        </div>
+
+        <div class="control-group">
+            <label for="octavesSlider">八度 (Octaves): <span id="octavesValue">4</span></label>
+            <input type="range" id="octavesSlider" min="1" max="8" step="1" value="4">
+        </div>
+        
+        <div class="control-group">
+            <label for="persistenceSlider">持久性 (Persistence): <span id="persistenceValue">0.50</span></label>
+            <input type="range" id="persistenceSlider" min="0.1" max="1.0" step="0.05" value="0.5">
+        </div>
+
+        <div class="control-group">
+            <label for="slopeSharpnessSlider">坡度銳利度 (Slope Sharpness): <span id="slopeSharpnessValue">1.00</span></label>
+            <input type="range" id="slopeSharpnessSlider" min="0.5" max="4.0" step="0.1" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <label for="waterLevelSlider">水位高度 (Water Level): <span id="waterLevelValue">-0.20</span></label>
+            <input type="range" id="waterLevelSlider" min="-0.5" max="0.2" step="0.01" value="-0.2">
+        </div>
+        
+        <div class="control-group">
+            <label for="continentDensitySlider">大陸密度 (Continent Density): <span id="continentDensityValue">0.50</span></label>
+            <input type="range" id="continentDensitySlider" min="0.0" max="1.0" step="0.01" value="0.5">
+        </div>
+
+        <div class="control-group">
+            <label for="detailLevelSlider">細節度 (Detail Level): <span id="detailLevelValue">0.50</span></label>
+            <input type="range" id="detailLevelSlider" min="0.0" max="1.0" step="0.01" value="0.5">
+        </div>
+        
+        <div class="control-group">
+            <label for="climateBlendSlider">氣候漸層 (Climate Blend): <span id="climateBlendValue">0.50</span></label>
+            <input type="range" id="climateBlendSlider" min="0.0" max="1.0" step="0.01" value="0.5">
+        </div>
+        
+        <div class="control-group">
+            <label for="averageTemperatureSlider">行星平均溫度 (Avg. Temp.): <span id="averageTemperatureValue">0.00</span></label>
+            <input type="range" id="averageTemperatureSlider" min="-1.0" max="1.0" step="0.01" value="0.0">
+        </div>
+
+        <div class="control-group">
+            <label for="temperatureDensitySlider">溫度密度 (Temperature Density): <span id="temperatureDensityValue">0.50</span></label>
+            <input type="range" id="temperatureDensitySlider" min="0.0" max="1.0" step="0.01" value="0.5">
+        </div>
+
+        <div class="control-group">
+            <label for="humidityDensitySlider">濕度密度 (Humidity Density): <span id="humidityDensityValue">0.50</span></label>
+            <input type="range" id="humidityDensitySlider" min="0.0" max="1.0" step="0.01" value="0.5">
+        </div>
+
+        <button id="generateButton">生成新的地表</button>
+    </div>
+
+    <div class="w-full md:w-2/3 flex justify-center items-center">
+        <canvas id="canvas"></canvas>
+    </div>
+</div>
+
+<script>
+    // Simplex Noise 函式庫，來源：https://gist.github.com/Krypton-Naos/700877a5610d48074d28
+    // 辛普萊克斯噪聲實作 (Simplex noise implementation)
+    // 由 Stefan Gustavson (2006-03-22) 創作，修訂 (2006-04-19)
+    // 翻譯成 JavaScript，來源：https://github.com/mrdoob/three.js/blob/master/examples/jsm/math/SimplexNoise.js
+    // 並由此處修改以適應單一檔案結構。
+    class SimplexNoise {
+        constructor(random) {
+            if (random === undefined) random = Math.random;
+            this.grad3 = [[1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
+                          [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
+                          [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]];
+            this.p = [];
+            for (let i = 0; i < 256; i++) {
+                this.p[i] = Math.floor(random() * 256);
+            }
+            this.perm = [];
+            for (let i = 0; i < 512; i++) {
+                this.perm[i] = this.p[i & 255];
+            }
+        }
+        dot(g, x, y, z) {
+            return g[0] * x + g[1] * y + g[2] * z;
+        }
+        noise(xin, yin, zin) {
+            const F3 = 1.0 / 3.0;
+            const s = (xin + yin + zin) * F3;
+            const i = Math.floor(xin + s);
+            const j = Math.floor(yin + s);
+            const k = Math.floor(zin + s);
+
+            const G3 = 1.0 / 6.0;
+            const t = (i + j + k) * G3;
+            const X0 = i - t;
+            const Y0 = j - t;
+            const Z0 = k - t;
+            const x0 = xin - X0;
+            const y0 = yin - Y0;
+            const z0 = zin - Z0;
+
+            let i1, j1, k1;
+            let i2, j2, k2;
+
+            if (x0 >= y0) {
+                if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+                else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+                else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
+            } else {
+                if (y0 < z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+                else if (x0 < z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+                else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+            }
+            const x1 = x0 - i1 + G3;
+            const y1 = y0 - j1 + G3;
+            const z1 = z0 - k1 + G3;
+            const x2 = x0 - i2 + 2.0 * G3;
+            const y2 = y0 - j2 + 2.0 * G3;
+            const z2 = z0 - k2 + 2.0 * G3;
+            const x3 = x0 - 1.0 + 3.0 * G3;
+            const y3 = y0 - 1.0 + 3.0 * G3;
+            const z3 = z0 - 1.0 + 3.0 * G3;
+
+            const ii = i & 255;
+            const jj = j & 255;
+            const kk = k & 255;
+            const gi0 = this.perm[ii + this.perm[jj + this.perm[kk]]] % 12;
+            const gi1 = this.perm[ii + i1 + this.perm[jj + j1 + this.perm[kk + k1]]] % 12;
+            const gi2 = this.perm[ii + i2 + this.perm[jj + j2 + this.perm[kk + k2]]] % 12;
+            const gi3 = this.perm[ii + 1 + this.perm[jj + 1 + this.perm[kk + 1]]] % 12;
+
+            let n0, n1, n2, n3;
+            let t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+            if (t0 < 0) {
+                n0 = 0.0;
+            } else {
+                t0 *= t0;
+                n0 = t0 * t0 * this.dot(this.grad3[gi0], x0, y0, z0);
+            }
+
+            let t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+            if (t1 < 0) {
+                n1 = 0.0;
+            } else {
+                t1 *= t1;
+                n1 = t1 * t1 * this.dot(this.grad3[gi1], x1, y1, z1);
+            }
+
+            let t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+            if (t2 < 0) {
+                n2 = 0.0;
+            } else {
+                t2 *= t2;
+                n2 = t2 * t2 * this.dot(this.grad3[gi2], x2, y2, z2);
+            }
+
+            let t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+            if (t3 < 0) {
+                n3 = 0.0;
+            } else {
+                t3 *= t3;
+                n3 = t3 * t3 * this.dot(this.grad3[gi3], x3, y3, z3);
+            }
+
+            return 32.0 * (n0 + n1 + n2 + n3);
+        }
+    }
+
+    // 隨機種子生成器
+    function stringToSeededRandom(seed) {
+        let x = 123456789;
+        let y = 362436069;
+        let z = 521288629;
+        let w = 88675123;
+        let c = 0;
+
+        for (let i = 0; i < seed.length; i++) {
+            x ^= (seed.charCodeAt(i) << 13) | (seed.charCodeAt(i) >>> 19);
+            y ^= (seed.charCodeAt(i) << 17) | (seed.charCodeAt(i) >>> 15);
+            z ^= (seed.charCodeAt(i) << 11) | (seed.charCodeAt(i) >>> 21);
+            w ^= (seed.charCodeAt(i) << 5) | (seed.charCodeAt(i) >>> 27);
+            c += seed.charCodeAt(i);
+        }
+
+        const random = () => {
+            const t = x ^ (x << 11);
+            x = y;
+            y = z;
+            z = w;
+            w = w ^ (w >>> 19) ^ (t ^ (t >>> 8));
+            return (w >>> 0) / 4294967296;
+        };
+
+        return random;
+    }
+
+    // 初始化 HTML 元素
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const seedInput = document.getElementById('seedInput');
+    const zoomSlider = document.getElementById('zoomSlider');
+    const zoomValueSpan = document.getElementById('zoomValue');
+    const frequencySlider = document.getElementById('frequencySlider');
+    const frequencyValueSpan = document.getElementById('frequencyValue');
+    const octavesSlider = document.getElementById('octavesSlider');
+    const octavesValueSpan = document.getElementById('octavesValue');
+    const persistenceSlider = document.getElementById('persistenceSlider');
+    const persistenceValueSpan = document.getElementById('persistenceValue');
+    const slopeSharpnessSlider = document.getElementById('slopeSharpnessSlider');
+    const slopeSharpnessValueSpan = document.getElementById('slopeSharpnessValue');
+    const waterLevelSlider = document.getElementById('waterLevelSlider');
+    const waterLevelValueSpan = document.getElementById('waterLevelValue');
+    const continentDensitySlider = document.getElementById('continentDensitySlider');
+    const continentDensityValueSpan = document.getElementById('continentDensityValue');
+    const detailLevelSlider = document.getElementById('detailLevelSlider');
+    const detailLevelValueSpan = document.getElementById('detailLevelValue');
+    const climateBlendSlider = document.getElementById('climateBlendSlider');
+    const climateBlendValueSpan = document.getElementById('climateBlendValue');
+    const averageTemperatureSlider = document.getElementById('averageTemperatureSlider');
+    const averageTemperatureValueSpan = document.getElementById('averageTemperatureValue');
+    const temperatureDensitySlider = document.getElementById('temperatureDensitySlider');
+    const temperatureDensityValueSpan = document.getElementById('temperatureDensityValue');
+    const humidityDensitySlider = document.getElementById('humidityDensitySlider');
+    const humidityDensityValueSpan = document.getElementById('humidityDensityValue');
+    const generateButton = document.getElementById('generateButton');
+
+    const width = 600;
+    const height = 600;
+    canvas.width = width;
+    canvas.height = height;
+
+    let simplex, continentNoise, temperatureNoise, humidityNoise, biomeNoise;
+    let offsetX = 0;
+    let offsetY = 0;
+    const maxOffset = width * 1.5; // 新增：設定最大拖曳範圍
+
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    // 將十六進位顏色碼轉換為 RGB
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? [
+            parseInt(result[1], 16),
+            parseInt(result[2], 16),
+            parseInt(result[3], 16)
+        ] : null;
+    }
+
+    // 顏色線性插值
+    function lerpColor(color1, color2, t) {
+        return [
+            color1[0] + (color2[0] - color1[0]) * t,
+            color1[1] + (color2[1] - color1[1]) * t,
+            color1[2] + (color2[2] - color1[2]) * t
+        ];
+    }
+    
+    // 定義不同氣候區的顏色調色板
+    const biomes = {
+        polar: [
+            { level: 0.0, color: hexToRgb('#e6f0f8') }, // 極地冰雪
+            { level: 0.2, color: hexToRgb('#b0c4de') }, // 極地苔原
+            { level: 0.6, color: hexToRgb('#7b8a96') }, // 凍土
+            { level: 1.0, color: hexToRgb('#444c56') }  // 岩石/山脈
+        ],
+        temperate: [
+            { level: 0.0, color: hexToRgb('#f7d377') }, // 沙灘
+            { level: 0.2, color: hexToRgb('#91b84f') }, // 草地
+            { level: 0.5, color: hexToRgb('#72983b') }, // 森林
+            { level: 0.8, color: hexToRgb('#577c2a') }, // 丘陵
+            { level: 1.0, color: hexToRgb('#444c56') }  // 山脈
+        ],
+        tropical: [
+            { level: 0.0, color: hexToRgb('#f7d377') }, // 沙灘
+            { level: 0.3, color: hexToRgb('#2a5f1a') }, // 雨林
+            { level: 0.6, color: hexToRgb('#1b3d11') }, // 密集植被
+            { level: 0.9, color: hexToRgb('#343a40') }, // 山脈
+            { level: 1.0, color: hexToRgb('#9ba3a9') }  // 雪線
+        ],
+        desert: [
+            { level: 0.0, color: hexToRgb('#f7d377') }, // 沙地
+            { level: 0.3, color: hexToRgb('#d2b48c') }, // 乾燥沙丘
+            { level: 0.6, color: hexToRgb('#a08b5f') }, // 岩漠
+            { level: 1.0, color: hexToRgb('#75664d') }  // 戈壁
+        ],
+        taiga: [
+            { level: 0.0, color: hexToRgb('#f7d377') }, // 沙灘
+            { level: 0.2, color: hexToRgb('#587a6c') }, // 針葉林
+            { level: 0.5, color: hexToRgb('#425c52') }, // 茂密針葉林
+            { level: 0.8, color: hexToRgb('#31443c') }, // 丘陵
+            { level: 1.0, color: hexToRgb('#444c56') }  // 山脈
+        ]
+    };
+
+    const deepWaterColor = hexToRgb('#1a4b86'); // 深海
+    const shallowWaterColor = hexToRgb('#2a6aab'); // 淺海
+
+    // 建立所有噪聲生成器
+    function initializeNoise() {
+        const seed = seedInput.value;
+        const randomFunc = stringToSeededRandom(seed);
+        simplex = new SimplexNoise(randomFunc);
+        continentNoise = new SimplexNoise(randomFunc);
+        temperatureNoise = new SimplexNoise(randomFunc);
+        humidityNoise = new SimplexNoise(randomFunc);
+        biomeNoise = new SimplexNoise(randomFunc);
+        offsetX = 0;
+        offsetY = 0;
+    }
+
+    // 繪製地表
+    function drawTerrain(baseFrequency, octaves, persistence, slopeSharpness, waterLevel, continentDensity, detailLevel, climateBlend, averageTemperature, temperatureDensity, humidityDensity, zoom) {
+        const imageData = ctx.createImageData(width, height);
+        
+        // 計算歸一化因子
+        let amplitudeSum = 0;
+        for (let i = 0; i < octaves; i++) {
+            amplitudeSum += Math.pow(persistence, i);
+        }
+
+        const continentFrequency = baseFrequency * 0.2;
+        const tempFreq = baseFrequency * 0.5;
+        const humidFreq = baseFrequency * 0.7;
+        const biomeFreq = baseFrequency * 1.5;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const nx = ((x + offsetX) / width) * 2 - 1;
+                const ny = ((y + offsetY) / height) * 2 - 1;
+                
+                const index = (y * width + x) * 4;
+
+                // 判斷是否在圓形視窗外，當縮放比例低於 1.0 時啟用
+                const screenDist = Math.sqrt((x - width / 2) * (x - width / 2) + (y - height / 2) * (y - height / 2));
+                const maxScreenDist = width / 2;
+                if (zoom < 1.0 && screenDist > maxScreenDist) {
+                    imageData.data[index] = 0;
+                    imageData.data[index + 1] = 0;
+                    imageData.data[index + 2] = 0;
+                    imageData.data[index + 3] = 0;
+                    continue;
+                }
+
+                const continentValue = continentNoise.noise((x + offsetX) * continentFrequency * zoom, (y + offsetY) * continentFrequency * zoom, 0); 
+                
+                let noiseValue = 0;
+                let frequency = baseFrequency;
+                let amplitude = 1;
+
+                for (let i = 0; i < octaves; i++) {
+                    noiseValue += simplex.noise((x + offsetX) * frequency * zoom, (y + offsetY) * frequency * zoom, 0) * amplitude;
+                    frequency *= 2;
+                    amplitude *= persistence;
+                }
+                
+                const normalizedValue = noiseValue / amplitudeSum;
+                let finalValue = (normalizedValue * detailLevel) + (continentValue * continentDensity);
+
+                // 應用坡度銳利度
+                let adjustedValue = (finalValue + 1) / 2;
+                adjustedValue = Math.pow(adjustedValue, slopeSharpness);
+                finalValue = adjustedValue * 2 - 1;
+
+                // 陸地和水域共同計算溫度和濕度
+                const normalizedY = (y + offsetY) / height;
+                const latitudeValue = 1 - Math.abs(normalizedY - 0.5) * 2;
+                let temperature = latitudeValue + temperatureNoise.noise((x + offsetX) * tempFreq * zoom, (y + offsetY) * tempFreq * zoom, 0) * temperatureDensity + averageTemperature;
+                let humidity = humidityNoise.noise((x + offsetX) * humidFreq * zoom, (y + offsetY) * humidFreq * zoom, 0) * humidityDensity;
+                
+                const biomeBlend = biomeNoise.noise((x + offsetX) * biomeFreq * zoom, (y + offsetY) * biomeFreq * zoom, 0) * climateBlend;
+                temperature = Math.max(-1, Math.min(1, temperature + biomeBlend));
+                humidity = Math.max(-1, Math.min(1, humidity + biomeBlend));
+
+                let color = [0, 0, 0];
+                
+                if (finalValue < waterLevel) {
+                    // 水域
+                    const deepWaterThreshold = waterLevel - 0.2;
+                    const waterT = Math.max(0, Math.min(1, (finalValue - deepWaterThreshold) / (waterLevel - deepWaterThreshold)));
+                    color = lerpColor(deepWaterColor, shallowWaterColor, waterT);
+
+                } else {
+                    // 陸地
+                    let selectedBiome;
+                    
+                    // 新的氣候判斷矩陣
+                    if (temperature > 0.3) {
+                        if (humidity > 0.3) {
+                            selectedBiome = 'tropical'; // 熱帶雨林
+                        } else {
+                            selectedBiome = 'desert'; // 炎熱沙漠
+                        }
+                    } else if (temperature < -0.2) {
+                        if (humidity > -0.2) {
+                            selectedBiome = 'taiga'; // 寒帶針葉林
+                        } else {
+                            selectedBiome = 'polar'; // 冰川
+                        }
+                    } else {
+                        if (humidity < -0.2) {
+                             selectedBiome = 'desert'; // 寒冷沙漠
+                        } else {
+                            selectedBiome = 'temperate'; // 溫帶
+                        }
+                    }
+
+                    const biomePalette = biomes[selectedBiome];
+                    let t = (finalValue - waterLevel) / (1 - waterLevel);
+                    
+                    let color1, color2;
+                    if (t >= biomePalette[biomePalette.length - 1].level) {
+                        color1 = biomePalette[biomePalette.length - 1].color;
+                        color2 = biomePalette[biomePalette.length - 1].color;
+                        t = 0;
+                    } else {
+                        for (let i = 0; i < biomePalette.length - 1; i++) {
+                            if (t >= biomePalette[i].level && t < biomePalette[i + 1].level) {
+                                color1 = biomePalette[i].color;
+                                color2 = biomePalette[i + 1].color;
+                                t = (t - biomePalette[i].level) / (biomePalette[i + 1].level - biomePalette[i].level);
+                                break;
+                            }
+                        }
+                    }
+
+                    color = lerpColor(color1, color2, t);
+                }
+                
+                imageData.data[index] = color[0];
+                imageData.data[index + 1] = color[1];
+                imageData.data[index + 2] = color[2];
+                imageData.data[index + 3] = 255;
+            }
+        }
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    // 處理所有滑桿和按鈕的事件
+    function updateTerrain() {
+        const zoom = parseFloat(zoomSlider.value);
+        const frequency = parseFloat(frequencySlider.value);
+        const octaves = parseInt(octavesSlider.value, 10);
+        const persistence = parseFloat(persistenceSlider.value);
+        const slopeSharpness = parseFloat(slopeSharpnessSlider.value);
+        const waterLevel = parseFloat(waterLevelSlider.value);
+        const continentDensity = parseFloat(continentDensitySlider.value);
+        const detailLevel = parseFloat(detailLevelSlider.value);
+        const climateBlend = parseFloat(climateBlendSlider.value);
+        const averageTemperature = parseFloat(averageTemperatureSlider.value);
+        const temperatureDensity = parseFloat(temperatureDensitySlider.value);
+        const humidityDensity = parseFloat(humidityDensitySlider.value);
+        
+        zoomValueSpan.textContent = zoom.toFixed(2);
+        frequencyValueSpan.textContent = frequency.toFixed(3);
+        octavesValueSpan.textContent = octaves;
+        persistenceValueSpan.textContent = persistence.toFixed(2);
+        slopeSharpnessValueSpan.textContent = slopeSharpness.toFixed(2);
+        waterLevelValueSpan.textContent = waterLevel.toFixed(2);
+        continentDensityValueSpan.textContent = continentDensity.toFixed(2);
+        detailLevelValueSpan.textContent = detailLevel.toFixed(2);
+        climateBlendValueSpan.textContent = climateBlend.toFixed(2);
+        averageTemperatureValueSpan.textContent = averageTemperature.toFixed(2);
+        temperatureDensityValueSpan.textContent = temperatureDensity.toFixed(2);
+        humidityDensityValueSpan.textContent = humidityDensity.toFixed(2);
+        
+        drawTerrain(frequency, octaves, persistence, slopeSharpness, waterLevel, continentDensity, detailLevel, climateBlend, averageTemperature, temperatureDensity, humidityDensity, zoom);
+    }
+
+    generateButton.addEventListener('click', () => {
+        seedInput.value = `seed_${Math.floor(Math.random() * 1000000)}`;
+        initializeNoise();
+        updateTerrain();
+    });
+
+    zoomSlider.addEventListener('input', updateTerrain);
+    frequencySlider.addEventListener('input', updateTerrain);
+    octavesSlider.addEventListener('input', updateTerrain);
+    persistenceSlider.addEventListener('input', updateTerrain);
+    slopeSharpnessSlider.addEventListener('input', updateTerrain);
+    waterLevelSlider.addEventListener('input', updateTerrain);
+    continentDensitySlider.addEventListener('input', updateTerrain);
+    detailLevelSlider.addEventListener('input', updateTerrain);
+    climateBlendSlider.addEventListener('input', updateTerrain);
+    averageTemperatureSlider.addEventListener('input', updateTerrain);
+    temperatureDensitySlider.addEventListener('input', updateTerrain);
+    humidityDensitySlider.addEventListener('input', updateTerrain);
+
+    // 滑鼠事件處理，用於拖曳視角
+    canvas.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        
+        const zoom = parseFloat(zoomSlider.value);
+        offsetX -= dx / zoom;
+        offsetY -= dy / zoom;
+        
+        // 新增：限制拖曳範圍
+        offsetX = Math.max(-maxOffset, Math.min(maxOffset, offsetX));
+        offsetY = Math.max(-maxOffset, Math.min(maxOffset, offsetY));
+
+        lastX = e.clientX;
+        lastY = e.clientY;
+        updateTerrain();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        isDragging = false;
+    });
+
+    // 觸控事件處理，用於拖曳視角
+    canvas.addEventListener('touchstart', (e) => {
+        isDragging = true;
+        const touch = e.touches[0];
+        lastX = touch.clientX;
+        lastY = touch.clientY;
+        e.preventDefault();
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        const dx = touch.clientX - lastX;
+        const dy = touch.clientY - lastY;
+        
+        const zoom = parseFloat(zoomSlider.value);
+        offsetX -= dx / zoom;
+        offsetY -= dy / zoom;
+
+        // 新增：限制拖曳範圍
+        offsetX = Math.max(-maxOffset, Math.min(maxOffset, offsetX));
+        offsetY = Math.max(-maxOffset, Math.min(maxOffset, offsetY));
+
+        lastX = touch.clientX;
+        lastY = touch.clientY;
+        updateTerrain();
+        e.preventDefault();
+    });
+
+    canvas.addEventListener('touchend', () => {
+        isDragging = false;
+    });
+
+    // 鍵盤事件處理，用於移動視角
+    document.addEventListener('keydown', (e) => {
+        const zoom = parseFloat(zoomSlider.value);
+        const moveSpeed = 20 / zoom; 
+        
+        switch(e.key) {
+            case 'ArrowUp':
+                offsetY -= moveSpeed;
+                break;
+            case 'ArrowDown':
+                offsetY += moveSpeed;
+                break;
+            case 'ArrowLeft':
+                offsetX -= moveSpeed;
+                break;
+            case 'ArrowRight':
+                offsetX += moveSpeed;
+                break;
+            default:
+                return;
+        }
+        
+        // 新增：限制鍵盤移動範圍
+        offsetX = Math.max(-maxOffset, Math.min(maxOffset, offsetX));
+        offsetY = Math.max(-maxOffset, Math.min(maxOffset, offsetY));
+        
+        updateTerrain();
+    });
+
+    // 頁面載入時生成地表
+    window.onload = () => {
+        initializeNoise();
+        updateTerrain();
+    };
+</script>
+
+</body>
+</html>

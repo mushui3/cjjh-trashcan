@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>schiol bird!</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #87CEEB; /* 天空藍背景 */
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* 防止滾動條 */
+        }
+        canvas {
+            display: block; /* 移除 canvas 下方的空白 */
+            background-color: #70C5CE; /* 遊戲背景 */
+        }
+        #startButton {
+            position: absolute;
+            padding: 15px 30px;
+            font-size: 24px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease;
+            z-index: 10; /* 確保按鈕在畫布之上 */
+        }
+        #startButton:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <button id="startButton">開始遊戲</button>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+
+        // 遊戲設定 (根據螢幕大小調整)
+        // 原始基準值 (用於比例縮放)
+        const BASE_WIDTH = 288;
+        const BASE_HEIGHT = 512;
+
+        let BIRD_LENGTH_BASE = 60; // **鳥的原始基準長度**
+        let BIRD_HEIGHT_BASE = 15; // 鳥的原始基準高度
+        let BEAK_SIZE_BASE = 10; // 鳥嘴的原始基準大小
+        let EYE_RADIUS_BASE = 2; // 眼睛的原始基準半徑
+        let FOOT_SIZE_BASE = 5; // 腳的原始基準大小
+        let GRAVITY_BASE = 0.3;
+        let JUMP_STRENGTH_BASE = -6;
+        let PIPE_WIDTH_BASE = 50;
+        let PIPE_GAP_BASE = 120;
+        let PIPE_SPEED_BASE = 2;
+        let GROUND_HEIGHT_BASE = 50;
+        let SCORE_FONT_SIZE_BASE = 30;
+
+        let ORGANIC_BA_RADIUS_BASE = 15;
+        let ORGANIC_BA_SPEED_BASE = 1.5;
+        const ORGANIC_BA_SCORE = 5;
+        const ORGANIC_BA_SPAWN_CHANCE = 0.005;
+
+        // 動態調整後的實際值
+        let BIRD_LENGTH;
+        let BIRD_HEIGHT;
+        let BEAK_SIZE;
+        let EYE_RADIUS;
+        let FOOT_SIZE;
+        let GRAVITY;
+        let JUMP_STRENGTH;
+        let PIPE_WIDTH;
+        let PIPE_GAP;
+        let PIPE_SPEED;
+        let GROUND_HEIGHT;
+        let SCORE_FONT_SIZE;
+
+        let ORGANIC_BA_RADIUS;
+        let ORGANIC_BA_SPEED;
+
+        let bird = {
+            x: 0,
+            y: 0,
+            dy: 0 // 垂直速度
+        };
+
+        let pipes = [];
+        let organicBas = [];
+        let score = 0;
+        let gameRunning = false;
+        let gameOver = false;
+        let animationFrameId = null; // 用於儲存 requestAnimationFrame 的 ID，初始為 null
+
+        // 調整畫布大小和遊戲元素比例
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            // 根據新的畫布大小計算縮放因子
+            // 這裡採用基於高度的縮放，確保垂直視野保持相似
+            const scaleFactor = canvas.height / BASE_HEIGHT; 
+
+            BIRD_LENGTH = BIRD_LENGTH_BASE * scaleFactor;
+            BIRD_HEIGHT = BIRD_HEIGHT_BASE * scaleFactor;
+            BEAK_SIZE = BEAK_SIZE_BASE * scaleFactor;
+            EYE_RADIUS = EYE_RADIUS_BASE * scaleFactor;
+            FOOT_SIZE = FOOT_SIZE_BASE * scaleFactor;
+            GRAVITY = GRAVITY_BASE * scaleFactor;
+            JUMP_STRENGTH = JUMP_STRENGTH_BASE * scaleFactor;
+            PIPE_WIDTH = PIPE_WIDTH_BASE * scaleFactor;
+            PIPE_GAP = PIPE_GAP_BASE * scaleFactor;
+            PIPE_SPEED = PIPE_SPEED_BASE * scaleFactor;
+            GROUND_HEIGHT = GROUND_HEIGHT_BASE * scaleFactor;
+            SCORE_FONT_SIZE = SCORE_FONT_SIZE_BASE * scaleFactor;
+            ORGANIC_BA_RADIUS = ORGANIC_BA_RADIUS_BASE * scaleFactor;
+            ORGANIC_BA_SPEED = ORGANIC_BA_SPEED_BASE * scaleFactor;
+
+            // 重新設定小鳥位置，保持相對位置
+            bird.x = canvas.width / 6;
+            bird.y = canvas.height / 2;
+
+            // 確保文字大小至少為 10px
+            if (SCORE_FONT_SIZE < 10) SCORE_FONT_SIZE = 10;
+
+            // 如果遊戲正在運行或已經結束，清空現有物件以避免縮放導致位置異常
+            // 讓遊戲在resize時重置，避免畫面混亂
+            if (gameRunning || gameOver) {
+                // 不直接調用 resetGame，因為那會觸發 gameLoop 啟動
+                // 這裡只清除物件，等待用戶重新開始
+                pipes = [];
+                organicBas = [];
+                bird.dy = 0; // 重置小鳥速度
+                // 將遊戲狀態設為結束，讓開始按鈕顯示
+                gameRunning = false;
+                gameOver = true;
+                startButton.style.display = 'block';
+                startButton.textContent = '重新開始';
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
+            }
+            // 每次 resize 後都立即渲染一次，確保畫面顯示正確
+            render();
+        }
+
+        // 繪製背景 (遊戲天空)
+        function drawBackground() {
+            ctx.fillStyle = '#70C5CE';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 繪製地面
+        function drawGround() {
+            ctx.fillStyle = '#D3D3D3'; // 灰色地面
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, GROUND_HEIGHT);
+            ctx.fillStyle = '#6B8E23'; // 草地顏色
+            // 讓草地高度按比例，但至少有一定厚度
+            ctx.fillRect(0, canvas.height - GROUND_HEIGHT - Math.max(10, 10 * (GROUND_HEIGHT / GROUND_HEIGHT_BASE)), canvas.width, Math.max(10, 10 * (GROUND_HEIGHT / GROUND_HEIGHT_BASE)));
+        }
+
+        // 繪製長條鳥 (包含身體、鳥嘴、眼睛和腳)
+        function drawBird() {
+            const birdX = bird.x - BIRD_LENGTH / 2;
+            const birdY = bird.y - BIRD_HEIGHT / 2;
+
+            // 繪製身體 (長條形)
+            ctx.fillStyle = '#FFD700'; // 金色鳥身
+            ctx.fillRect(birdX, birdY, BIRD_LENGTH, BIRD_HEIGHT);
+            ctx.strokeStyle = '#DAA520'; // 金色邊框
+            ctx.lineWidth = 2 * (BIRD_HEIGHT / BIRD_HEIGHT_BASE);
+            ctx.strokeRect(birdX, birdY, BIRD_LENGTH, BIRD_HEIGHT);
+
+            // 繪製鳥嘴 (三角形，在右側)
+            ctx.fillStyle = '#FFA500'; // 橘色鳥嘴
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH, bird.y - BEAK_SIZE / 2); // 嘴巴左上角
+            ctx.lineTo(birdX + BIRD_LENGTH + BEAK_SIZE, bird.y);      // 嘴巴尖端
+            ctx.lineTo(birdX + BIRD_LENGTH, bird.y + BEAK_SIZE / 2); // 嘴巴左下角
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#CD7F32'; // 棕色邊框
+            ctx.stroke();
+
+            // 繪製眼睛 (黑點，在身體右上方一點)
+            ctx.beginPath();
+            ctx.arc(birdX + BIRD_LENGTH - (BEAK_SIZE * 0.5), birdY + BIRD_HEIGHT * 0.3, EYE_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+
+            // 繪製腳 (兩隻簡單的 2D 線條腳，在身體下方)
+            ctx.strokeStyle = '#A52A2A'; // 棕色腳
+            ctx.lineWidth = 2 * (FOOT_SIZE / FOOT_SIZE_BASE);
+            
+            // 左腳
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.3, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.3 - FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.3, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.3 + FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.stroke();
+
+            // 右腳 (稍微靠右一點)
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.7, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.7 - FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.7, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.7 + FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.stroke();
+
+
+            // 繪製文字標籤 "實秋鳥" (在身體中央)
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${Math.max(10, SCORE_FONT_SIZE * 0.6)}px Arial`; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('實秋鳥', bird.x, bird.y); 
+        }
+
+        // 繪製水管 (矩形)
+        function drawPipes() {
+            pipes.forEach(pipe => {
+                ctx.fillStyle = '#708090'; // 灰色水管
+                // 上方水管
+                ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+                // 下方水管
+                ctx.fillRect(pipe.x, pipe.bottom, PIPE_WIDTH, canvas.height - pipe.bottom - GROUND_HEIGHT);
+
+                // 繪製水管邊框 (深灰色)
+                ctx.strokeStyle = '#2F4F4F';
+                ctx.lineWidth = 2 * (PIPE_WIDTH / PIPE_WIDTH_BASE);
+                ctx.strokeRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+                ctx.strokeRect(pipe.x, pipe.bottom, PIPE_WIDTH, canvas.height - pipe.bottom - GROUND_HEIGHT);
+            });
+        }
+
+        // 繪製有機芭
+        function drawOrganicBas() {
+            organicBas.forEach(oba => {
+                ctx.beginPath();
+                ctx.arc(oba.x, oba.y, ORGANIC_BA_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = '#32CD32'; // 亮綠色
+                ctx.fill();
+                ctx.strokeStyle = '#228B22'; // 深綠色邊框
+                ctx.lineWidth = 2 * (ORGANIC_BA_RADIUS / ORGANIC_BA_RADIUS_BASE);
+                ctx.stroke();
+
+                // 繪製文字標籤 "有機芭"
+                ctx.fillStyle = 'white';
+                ctx.font = `bold ${Math.max(8, ORGANIC_BA_RADIUS * 0.8)}px Arial`; // 文字大小為半徑的 80%
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('有機芭', oba.x, oba.y);
+            });
+        }
+
+        // 繪製分數
+        function drawScore() {
+            ctx.fillStyle = 'white';
+            ctx.font = `${SCORE_FONT_SIZE}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(`分數: ${score}`, canvas.width / 2, SCORE_FONT_SIZE + (20 * (canvas.height / BASE_HEIGHT)));
+        }
+
+        // 更新遊戲狀態
+        function update() {
+            // 小鳥物理
+            bird.dy += GRAVITY;
+            bird.y += bird.dy;
+
+            // 生成水管
+            if (pipes.length === 0 || pipes[pipes.length - 1].x < canvas.width - (200 * (canvas.width / BASE_WIDTH))) { // 根據寬度調整生成距離
+                let topHeight = Math.random() * (canvas.height - GROUND_HEIGHT - PIPE_GAP - (100 * (canvas.height / BASE_HEIGHT))) + (50 * (canvas.height / BASE_HEIGHT)); // 確保水管有一定高度且不會太高
+                pipes.push({
+                    x: canvas.width,
+                    top: topHeight,
+                    bottom: topHeight + PIPE_GAP,
+                    passed: false // 標記小鳥是否已經通過
+                });
+            }
+
+            // 移動水管
+            pipes.forEach(pipe => {
+                pipe.x -= PIPE_SPEED;
+
+                // 檢查小鳥是否通過水管
+                if (pipe.x + PIPE_WIDTH < bird.x && !pipe.passed) {
+                    score++;
+                    pipe.passed = true;
+                }
+
+                // 碰撞檢測 - 熱狗鳥與地面或天空碰撞
+                // 使用鳥的實際高度來檢測
+                if (bird.y + BIRD_HEIGHT / 2 >= canvas.height - GROUND_HEIGHT || bird.y - BIRD_HEIGHT / 2 <= 0) {
+                    endGame();
+                }
+
+                // 碰撞檢測 - 熱狗鳥與水管碰撞
+                const birdLeft = bird.x - BIRD_LENGTH / 2;
+                const birdRight = bird.x + BIRD_LENGTH / 2;
+                const birdTop = bird.y - BIRD_HEIGHT / 2;
+                const birdBottom = bird.y + BIRD_HEIGHT / 2;
+
+                if (birdRight > pipe.x && birdLeft < pipe.x + PIPE_WIDTH) {
+                    if (birdTop < pipe.top || birdBottom > pipe.bottom) {
+                        endGame();
+                    }
+                }
+            });
+
+            // 移除已出畫面水管
+            pipes = pipes.filter(pipe => pipe.x + PIPE_WIDTH > 0);
+
+            // 生成有機芭
+            if (Math.random() < ORGANIC_BA_SPAWN_CHANCE) {
+                organicBas.push({
+                    x: canvas.width,
+                    y: Math.random() * (canvas.height - GROUND_HEIGHT - (50 * (canvas.height / BASE_HEIGHT))) + (25 * (canvas.height / BASE_HEIGHT)) // 隨機Y座標
+                });
+            }
+
+            // 移動有機芭並檢測碰撞
+            organicBas.forEach((oba, index) => {
+                oba.x -= ORGANIC_BA_SPEED;
+
+                // 碰撞檢測 - 長條鳥與有機芭
+                // 這裡改用簡單的矩形-圓形碰撞檢測，會更適合長條鳥
+                const birdLeft = bird.x - BIRD_LENGTH / 2;
+                const birdRight = bird.x + BIRD_LENGTH / 2;
+                const birdTop = bird.y - BIRD_HEIGHT / 2;
+                const birdBottom = bird.y + BIRD_HEIGHT / 2;
+
+                const obaLeft = oba.x - ORGANIC_BA_RADIUS;
+                const obaRight = oba.x + ORGANIC_BA_RADIUS;
+                const obaTop = oba.y - ORGANIC_BA_RADIUS;
+                const obaBottom = oba.y + ORGANIC_BA_RADIUS;
+
+                // 檢查矩形包圍盒是否重疊
+                if (birdRight > obaLeft && birdLeft < obaRight &&
+                    birdBottom > obaTop && birdTop < obaBottom) {
+                    score += ORGANIC_BA_SCORE; // 增加額外分數
+                    organicBas.splice(index, 1); // 移除被吃掉的有機芭
+                }
+            });
+
+            // 移除已出畫面有機芭
+            organicBas = organicBas.filter(oba => oba.x + ORGANIC_BA_RADIUS > 0);
+        }
+
+        // 遊戲結束
+        function endGame() {
+            gameRunning = false;
+            gameOver = true;
+            startButton.style.display = 'block'; // 顯示開始按鈕
+            startButton.textContent = '重新開始';
+            // 停止 requestAnimationFrame 循環，解決 dy 累加問題
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId); 
+                animationFrameId = null; // 清除 ID
+            }
+        }
+
+        // 繪製所有遊戲元素
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空畫布
+            drawBackground();
+            drawPipes();
+            drawGround();
+            drawBird();
+            drawOrganicBas(); // 繪製有機芭
+            drawScore();
+
+            if (gameOver) {
+                ctx.fillStyle = 'red';
+                ctx.font = `bold ${SCORE_FONT_SIZE * 1.5}px Arial`; // 遊戲結束文字更大
+                ctx.textAlign = 'center';
+                ctx.fillText('遊戲結束！', canvas.width / 2, canvas.height / 2 - SCORE_FONT_SIZE);
+                ctx.font = `${SCORE_FONT_SIZE}px Arial`;
+                ctx.fillText(`最終分數: ${score}`, canvas.width / 2, canvas.height / 2 + SCORE_FONT_SIZE / 2);
+            }
+        }
+
+        // 遊戲主循環
+        function gameLoop() {
+            if (gameRunning) { // 只在遊戲運行時才更新和繪製
+                update();
+            }
+            render(); // 渲染總是執行，以便顯示遊戲結束畫面
+
+            // requestAnimationFrame 在 update 和 render 之後才調用，並儲存其 ID
+            animationFrameId = requestAnimationFrame(gameLoop); 
+        }
+
+        // 監聽點擊或空白鍵跳躍
+        function jump() {
+            if (gameRunning) {
+                bird.dy = JUMP_STRENGTH;
+            } else if (gameOver) {
+                resetGame(); // 遊戲結束時點擊或按空白鍵重新開始
+            }
+        }
+
+        canvas.addEventListener('click', jump);
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                jump();
+                e.preventDefault(); // 防止空白鍵滾動頁面
+            }
+        });
+
+        // 重置遊戲
+        function resetGame() {
+            bird = {
+                x: canvas.width / 6, // 重新設定初始位置
+                y: canvas.height / 2,
+                dy: 0 // *** 確保 dy 重置為 0，這就是關鍵！ ***
+            };
+            pipes = [];
+            organicBas = []; // 重置有機芭
+            score = 0;
+            gameOver = false;
+            startButton.style.display = 'none'; // 隱藏開始按鈕
+            gameRunning = true;
+            
+            // 重新啟動遊戲循環
+            // 確保每次重置時，如果動畫循環還在運行就先停止它，再重新啟動一個新的
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId); 
+            }
+            gameLoop(); // 啟動新的遊戲循環
+        }
+
+        // 監聽視窗大小改變事件
+        window.addEventListener('resize', resizeCanvas);
+
+        // 初始設定畫布大小
+        resizeCanvas();
+        // 初始只渲染一次，顯示起始畫面和按鈕
+        render(); 
+
+        // 將 gameLoop 的首次啟動放在按鈕點擊事件中
+        startButton.addEventListener('click', () => {
+            if (!gameRunning) { // 只有當遊戲不在運行狀態時才啟動
+                resetGame(); // 首次點擊或重新開始都走這個流程
+            }
+        });
+
+    </script>
+</body>
+</html>

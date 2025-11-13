@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模組化點擊遊戲 - 自動點擊版</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #gameContainer {
+            background-color: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            text-align: center;
+            width: 90%;
+            max-width: 600px;
+        }
+
+        #scoreDisplay {
+            font-size: 3.5em;
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        #clickButton {
+            padding: 25px 50px;
+            font-size: 2.2em;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 6px #3e8e41;
+            transition: all 0.2s ease;
+            margin-bottom: 30px;
+        }
+
+        #clickButton:hover {
+            background-color: #45a049;
+            box-shadow: 0 8px #3e8e41;
+            transform: translateY(-2px);
+        }
+
+        #clickButton:active {
+            background-color: #3e8e41;
+            box-shadow: 0 2px #666;
+            transform: translateY(4px);
+        }
+
+        .upgrade-section {
+            margin-top: 30px;
+            border-top: 2px solid #eee;
+            padding-top: 20px;
+        }
+
+        #upgradesContainer {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .upgrade-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .upgrade-info {
+            text-align: left;
+            flex-grow: 1;
+        }
+
+        .upgrade-info h3 {
+            margin: 0 0 5px 0;
+            color: #555;
+            font-size: 1.5em;
+        }
+
+        .upgrade-info p {
+            margin: 0;
+            color: #777;
+            font-size: 1.1em;
+        }
+
+        .buy-button {
+            padding: 12px 25px;
+            font-size: 1.2em;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 4px #0056b3;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            margin-left: 15px;
+        }
+
+        .buy-button:hover {
+            background-color: #0069d9;
+            box-shadow: 0 6px #0056b3;
+            transform: translateY(-1px);
+        }
+
+        .buy-button:active {
+            background-color: #0056b3;
+            box-shadow: 0 1px #333;
+            transform: translateY(2px);
+        }
+
+        .buy-button:disabled {
+            background-color: #cccccc;
+            box-shadow: 0 2px #999999;
+            cursor: not-allowed;
+            transform: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="scoreDisplay">分數：0</div>
+        <button id="clickButton">點我！</button>
+
+        <div class="upgrade-section">
+            <h2>道具商店</h2>
+            <div id="upgradesContainer">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 遊戲變數 ---
+        let score = 0;              // 當前分數
+        let clickPower = 1;         // 每次手動點擊增加的分數（基礎值 + 道具加成）
+        let autoClickPower = 0;     // 每秒自動增加的分數
+
+        // --- 道具資料結構 ---
+        const upgrades = [
+            {
+                id: 'handOfPower',
+                name: '誒唉元年',
+                description: '每次點擊額外增加',
+                type: 'click', // 新增道具類型：點擊
+                basePrice: 10,
+                priceFactor: 1.5,
+                bonusPower: 1,
+                count: 0
+            },
+            {
+                id: 'luckyCharm',
+                name: '徐吉春',
+                description: '每次點擊額外增加',
+                type: 'click',
+                basePrice: 50,
+                priceFactor: 1.8,
+                bonusPower: 5,
+                count: 0
+            },
+            {
+                id: 'goldenPickaxe',
+                name: '125',
+                description: '每次點擊額外增加',
+                type: 'click',
+                basePrice: 200,
+                priceFactor: 2.0,
+                bonusPower: 20,
+                count: 0
+            },
+            {
+                id: 'schiolbird',
+                name: '梁實秋',
+                description: '每次點擊額外增加',
+                type: 'click',
+                basePrice: 500,
+                priceFactor: 2.1,
+                bonusPower: 45,
+                count: 0
+            },
+            {
+                id: 'autoClicker',
+                name: '隱逸吃鳥之宗',
+                description: '每秒自動增加', // 描述改為適合自動點擊
+                type: 'auto', // 新增道具類型：自動
+                basePrice: 1000, // 自動點擊道具價格較高
+                priceFactor: 2.5, // 漲價幅度可以更大
+                bonusPower: 10, // 每購買一個每秒增加 10 分
+                count: 0
+            }
+            // 你可以在這裡繼續添加更多道具！
+        ];
+
+        // --- 取得 HTML 元素 ---
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const clickButton = document.getElementById('clickButton');
+        const upgradesContainer = document.getElementById('upgradesContainer');
+
+        // --- 函式：計算道具當前價格 ---
+        function calculateCurrentPrice(upgrade) {
+            return Math.round(upgrade.basePrice * (upgrade.priceFactor ** upgrade.count));
+        }
+
+        // --- 函式：更新遊戲顯示 ---
+        function updateDisplay() {
+            scoreDisplay.textContent = `分數：${score}`;
+
+            // 重新計算總點擊力量和自動點擊力量
+            let totalClickPower = 1; // 基礎手動點擊力量
+            let totalAutoClickPower = 0; // 基礎自動點擊力量
+
+            upgrades.forEach(upgrade => {
+                if (upgrade.type === 'click') {
+                    totalClickPower += upgrade.count * upgrade.bonusPower;
+                } else if (upgrade.type === 'auto') {
+                    totalAutoClickPower += upgrade.count * upgrade.bonusPower;
+                }
+            });
+            clickPower = totalClickPower;     // 更新全局的手動點擊力量
+            autoClickPower = totalAutoClickPower; // 更新全局的自動點擊力量
+
+            // 更新每個道具的顯示和按鈕狀態
+            upgrades.forEach(upgrade => {
+                const currentPrice = calculateCurrentPrice(upgrade);
+
+                const priceSpan = document.getElementById(`${upgrade.id}Price`);
+                const bonusSpan = document.getElementById(`${upgrade.id}Bonus`);
+                const countSpan = document.getElementById(`${upgrade.id}Count`);
+                const buyButton = document.getElementById(`buy${upgrade.id.charAt(0).toUpperCase() + upgrade.id.slice(1)}`);
+
+                if (priceSpan) priceSpan.textContent = currentPrice;
+                // 根據道具類型顯示不同的描述文字
+                if (bonusSpan) bonusSpan.textContent = `${upgrade.bonusPower} ${upgrade.type === 'click' ? '分' : '分/秒'}`;
+                if (countSpan) countSpan.textContent = upgrade.count;
+
+                if (buyButton) {
+                    buyButton.disabled = score < currentPrice;
+                }
+            });
+        }
+
+        // --- 函式：處理點擊按鈕 ---
+        function handleClick() {
+            score += clickPower;
+            updateDisplay();
+        }
+
+        // --- 函式：購買道具 (通用函式) ---
+        function buyUpgrade(upgradeId) {
+            const upgrade = upgrades.find(up => up.id === upgradeId);
+
+            if (!upgrade) {
+                console.error(`找不到 ID 為 ${upgradeId} 的道具！`);
+                return;
+            }
+
+            const currentPrice = calculateCurrentPrice(upgrade);
+
+            if (score >= currentPrice) {
+                score -= currentPrice;
+                upgrade.count++;
+                // 購買道具後立即更新顯示，以便重新計算自動點擊率
+                updateDisplay();
+            } else {
+                alert('分數不足以購買！');
+            }
+        }
+
+        // --- 函式：動態建立道具的 HTML ---
+        function createUpgradeElement(upgrade) {
+            const currentPrice = calculateCurrentPrice(upgrade);
+
+            const upgradeItemDiv = document.createElement('div');
+            upgradeItemDiv.className = 'upgrade-item';
+
+            // 根據道具類型調整描述文字
+            const bonusText = `${upgrade.description} <span id="${upgrade.id}Bonus">${upgrade.bonusPower} ${upgrade.type === 'click' ? '分' : '分/秒'}</span>！`;
+
+            upgradeItemDiv.innerHTML = `
+                <div class="upgrade-info">
+                    <h3>${upgrade.name}</h3>
+                    <p>${bonusText}</p>
+                    <p>價格：<span id="${upgrade.id}Price">${currentPrice}</span> 分</p>
+                    <p>已購買：<span id="${upgrade.id}Count">${upgrade.count}</span> 個</p>
+                </div>
+                <button id="buy${upgrade.id.charAt(0).toUpperCase() + upgrade.id.slice(1)}" class="buy-button" ${score < currentPrice ? 'disabled' : ''}>購買</button>
+            `;
+
+            const buyButton = upgradeItemDiv.querySelector(`#buy${upgrade.id.charAt(0).toUpperCase() + upgrade.id.slice(1)}`);
+            buyButton.addEventListener('click', () => buyUpgrade(upgrade.id));
+
+            return upgradeItemDiv;
+        }
+
+        // --- 函式：自動點擊邏輯 ---
+        function autoClickLoop() {
+            if (autoClickPower > 0) {
+                score += autoClickPower; // 根據自動點擊力量增加分數
+                updateDisplay();         // 更新顯示
+            }
+        }
+
+        // --- 遊戲初始化 ---
+        function initializeGame() {
+            upgradesContainer.innerHTML = '';
+
+            upgrades.forEach(upgrade => {
+                const upgradeElement = createUpgradeElement(upgrade);
+                upgradesContainer.appendChild(upgradeElement);
+            });
+
+            clickButton.addEventListener('click', handleClick);
+
+            // 每秒執行一次自動點擊邏輯
+            setInterval(autoClickLoop, 1000); // 1000 毫秒 = 1 秒
+
+            updateDisplay();
+        }
+
+        window.onload = initializeGame;
+    </script>
+</body>
+</html>

@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>射殺梁實秋</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #2c3e50; /* 深藍色背景 */
+            overflow: hidden; /* 防止滾動條 */
+            flex-direction: column; /* 讓按鈕和畫布垂直排列 */
+        }
+        #gameContainer {
+            position: relative; /* 為了讓遊戲結束畫面疊在上面 */
+            border: 5px solid #34495e;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            margin-bottom: 20px; /* 畫布下方留白給按鈕 */
+        }
+        canvas {
+            background-color: #87CEEB; /* 天空藍背景 */
+            display: block;
+            cursor: none; /* 隱藏預設滑鼠游標 */
+        }
+        #controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        button {
+            padding: 12px 25px;
+            font-size: 1.1em;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        #pauseButton {
+            background-color: #f39c12;
+        }
+        #pauseButton:hover {
+            background-color: #e67e22;
+        }
+
+        #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            z-index: 10; /* 確保在畫布之上 */
+        }
+        #gameOverScreen h2 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: #ecf0f1;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        #gameOverScreen p {
+            font-size: 1.5em;
+            margin-bottom: 30px;
+            color: #bdc3c7;
+        }
+        #gameOverScreen button {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        #gameOverScreen button:hover {
+            background-color: #2ecc71;
+            transform: translateY(-2px);
+        }
+         #gameOverScreen button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        #gameStartScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex; /* 初始顯示 */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            z-index: 11; /* 確保在遊戲結束畫面之上 */
+        }
+        #gameStartScreen h2 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: #ecf0f1;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        #gameStartScreen p {
+            font-size: 1.5em;
+            margin-bottom: 30px;
+            color: #bdc3c7;
+        }
+        #gameStartScreen button {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        #gameStartScreen button:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+         #gameStartScreen button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="gameOverScreen">
+            <h2>遊戲結束！</h2>
+            <p>您的分數是：<span id="finalScore">0</span></p>
+            <button id="restartButton">重新開始</button>
+        </div>
+        <div id="gameStartScreen">
+            <h2>射殺梁實秋</h2>
+            <p>點擊 "開始遊戲" 來保護居仁動物園！</p>
+            <button id="startButton">開始遊戲</button>
+        </div>
+    </div>
+    <div id="controls">
+        <button id="pauseButton">暫停</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('gameContainer');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreSpan = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+        const gameStartScreen = document.getElementById('gameStartScreen');
+        const startButton = document.getElementById('startButton');
+        const pauseButton = document.getElementById('pauseButton');
+
+        // 遊戲常數
+        const PLAYER_BULLET_RADIUS = 5;
+        const PLAYER_BULLET_SPEED = 15;
+        const INITIAL_LIVES = 5;
+        const BIRD_SPAWN_INTERVAL = 1500;
+        const BIRD_MIN_SPEED = 1.5;
+        const BIRD_MAX_SPEED = 5;
+        const BIRD_BASE_LENGTH = 60;
+        const BIRD_BASE_HEIGHT = 30;
+        const BEAK_SIZE_BASE = 10;
+        const EYE_RADIUS_BASE = 3;
+        const FOOT_SIZE_BASE = 8;
+        const SCORE_FONT_SIZE = 24;
+        const CROSSHAIR_SIZE = 20;
+        const CROSSHAIR_COLOR = 'lime';
+        const GRAVITY = 0.3; // 重力加速度，影響墜落速度
+
+        // 粒子特效常數
+        const PARTICLE_COUNT = 15; // 每次擊中生成的粒子數量
+        const PARTICLE_MIN_RADIUS = 1;
+        const PARTICLE_MAX_RADIUS = 3;
+        const PARTICLE_SPEED = 5; // 粒子初始速度
+        const PARTICLE_LIFESPAN = 40; // 粒子生命週期 (幀數)
+        const BLOOD_COLOR = 'rgba(139, 0, 0,'; // 深紅色，最後一個值是透明度
+
+        // 遊戲變數
+        let score = 0;
+        let lives = INITIAL_LIVES;
+        let birds = [];
+        let bullets = [];
+        let particles = []; // 新增：儲存血液粒子的陣列
+        let lastBirdSpawnTime = 0;
+        let gameActive = false;
+        let gameStarted = false;
+        let birdSpeedMultiplier = 1;
+        let animationFrameId;
+        let crosshairX = canvas.width / 2;
+        let crosshairY = canvas.height / 2;
+        let lastTime = 0; // 用於平滑上下擺動的動畫時間
+
+        // 玩家射擊點 (固定在畫面底部中央)
+        const playerShotX = canvas.width / 2;
+        const playerShotY = canvas.height;
+
+        // 繪製單隻鳥
+        function drawBird(bird) {
+            const BIRD_LENGTH = BIRD_BASE_LENGTH * bird.scale;
+            const BIRD_HEIGHT = BIRD_BASE_HEIGHT * bird.scale;
+            const BEAK_SIZE = BEAK_SIZE_BASE * bird.scale;
+            const EYE_RADIUS = EYE_RADIUS_BASE * bird.scale;
+            const FOOT_SIZE = FOOT_SIZE_BASE * bird.scale;
+
+            const birdX = bird.x - BIRD_LENGTH / 2;
+            const birdY = bird.y - BIRD_HEIGHT / 2;
+
+            // 繪製身體 (長條形)
+            ctx.fillStyle = '#FFD700'; // 金色鳥身
+            ctx.fillRect(birdX, birdY, BIRD_LENGTH, BIRD_HEIGHT);
+            ctx.strokeStyle = '#DAA520'; // 金色邊框
+            ctx.lineWidth = 2 * (BIRD_HEIGHT / BIRD_BASE_HEIGHT);
+            ctx.strokeRect(birdX, birdY, BIRD_LENGTH, BIRD_HEIGHT);
+
+            // 繪製鳥嘴 (三角形，在右側)
+            ctx.fillStyle = '#FFA500'; // 橘色鳥嘴
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH, bird.y - BEAK_SIZE / 2); // 嘴巴左上角
+            ctx.lineTo(birdX + BIRD_LENGTH + BEAK_SIZE, bird.y);      // 嘴巴尖端
+            ctx.lineTo(birdX + BIRD_LENGTH, bird.y + BEAK_SIZE / 2); // 嘴巴左下角
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#CD7F32'; // 棕色邊框
+            ctx.stroke();
+
+            // 繪製眼睛 (黑點，在身體右上方一點)
+            ctx.beginPath();
+            ctx.arc(birdX + BIRD_LENGTH - (BEAK_SIZE * 0.5), birdY + BIRD_HEIGHT * 0.3, EYE_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+
+            // 繪製腳 (兩隻簡單的 2D 線條腳，在身體下方)
+            ctx.strokeStyle = '#A52A2A'; // 棕色腳
+            ctx.lineWidth = 2 * (FOOT_SIZE / FOOT_SIZE_BASE);
+            
+            // 左腳
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.3, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.3 - FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.3, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.3 + FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.stroke();
+
+            // 右腳 (稍微靠右一點)
+            ctx.beginPath();
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.7, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.7 - FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.moveTo(birdX + BIRD_LENGTH * 0.7, birdY + BIRD_HEIGHT);
+            ctx.lineTo(birdX + BIRD_LENGTH * 0.7 + FOOT_SIZE, birdY + BIRD_HEIGHT + FOOT_SIZE);
+            ctx.stroke();
+
+            // 繪製文字標籤 "實秋鳥" (在身體中央)
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${Math.max(10, SCORE_FONT_SIZE * 0.6 * bird.scale)}px Arial`; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('實秋鳥', bird.x, bird.y); 
+        }
+
+        // 繪製子彈
+        function drawBullet(bullet) {
+            ctx.beginPath();
+            ctx.arc(bullet.x, bullet.y, PLAYER_BULLET_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = 'red';
+            ctx.fill();
+        }
+
+        // 繪製準心
+        function drawCrosshair() {
+            ctx.strokeStyle = CROSSHAIR_COLOR;
+            ctx.lineWidth = 2;
+            
+            // 垂直線
+            ctx.beginPath();
+            ctx.moveTo(crosshairX, crosshairY - CROSSHAIR_SIZE / 2);
+            ctx.lineTo(crosshairX, crosshairY + CROSSHAIR_SIZE / 2);
+            ctx.stroke();
+
+            // 水平線
+            ctx.beginPath();
+            ctx.moveTo(crosshairX - CROSSHAIR_SIZE / 2, crosshairY);
+            ctx.lineTo(crosshairX + CROSSHAIR_SIZE / 2, crosshairY);
+            ctx.stroke();
+
+            // 中心點
+            ctx.beginPath();
+            ctx.arc(crosshairX, crosshairY, 2, 0, Math.PI * 2);
+            ctx.fillStyle = CROSSHAIR_COLOR;
+            ctx.fill();
+        }
+
+        // 創建新鳥
+        function createBird() {
+            const scale = 0.8 + Math.random() * 0.7; // 隨機大小 (0.8 到 1.5 倍)
+            const speed = (BIRD_MIN_SPEED + Math.random() * (BIRD_MAX_SPEED - BIRD_MIN_SPEED)) * birdSpeedMultiplier;
+            birds.push({
+                x: canvas.width + BIRD_BASE_LENGTH / 2, // 從畫面右側出現
+                initialY: Math.random() * (canvas.height * 0.7 - BIRD_BASE_HEIGHT) + BIRD_BASE_HEIGHT / 2, // 初始Y軸，用於擺動計算
+                y: 0, // 實際Y軸位置會在updateBirds中計算
+                speed: speed,
+                scale: scale,
+                BIRD_LENGTH: BIRD_BASE_LENGTH * scale,
+                BIRD_HEIGHT: BIRD_BASE_HEIGHT * scale,
+                isDead: false, // 新增屬性，判斷鳥是否死亡
+                velocityY: 0, // 死亡墜落時的Y軸速度
+                amplitude: 15 + Math.random() * 15, // 上下擺動幅度 (15-30)
+                frequency: 0.005 + Math.random() * 0.005, // 上下擺動頻率 (0.005-0.01)
+                phase: Math.random() * Math.PI * 2 // 初始擺動相位
+            });
+        }
+
+        // 創建血液粒子
+        function createBloodParticles(x, y) {
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const angle = Math.random() * Math.PI * 2; // 隨機方向
+                const speed = Math.random() * PARTICLE_SPEED; // 隨機速度
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: PARTICLE_MIN_RADIUS + Math.random() * (PARTICLE_MAX_RADIUS - PARTICLE_MIN_RADIUS),
+                    life: PARTICLE_LIFESPAN,
+                    maxLife: PARTICLE_LIFESPAN
+                });
+            }
+        }
+
+        // 繪製粒子
+        function drawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                const opacity = p.life / p.maxLife; // 根據生命週期計算透明度
+                ctx.fillStyle = `${BLOOD_COLOR} ${opacity})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // 更新粒子位置和生命週期
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += GRAVITY * 0.5; // 粒子也受重力影響，但可以小一點
+                p.life--; // 生命週期減少
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1); // 移除生命週期結束的粒子
+                }
+            }
+        }
+
+        // 更新鳥的位置 (包含上下擺動和死亡墜落)
+        function updateBirds(currentTime) {
+            for (let i = birds.length - 1; i >= 0; i--) {
+                const bird = birds[i];
+
+                if (!bird.isDead) {
+                    // 正常飛行狀態
+                    bird.x -= bird.speed;
+                    // 上下擺動效果
+                    bird.y = bird.initialY + bird.amplitude * Math.sin(currentTime * bird.frequency + bird.phase);
+
+                    // 如果鳥飛出畫面左側，則生命值減少
+                    if (bird.x + bird.BIRD_LENGTH / 2 < 0) {
+                        birds.splice(i, 1);
+                        lives--;
+                        if (lives <= 0) {
+                            endGame();
+                        }
+                    }
+                } else {
+                    // 死亡墜落狀態
+                    bird.velocityY += GRAVITY; // 施加重力
+                    bird.y += bird.velocityY; // 更新Y軸位置
+
+                    // 如果鳥墜落出畫面底部，則移除該鳥 (不扣生命)
+                    if (bird.y - bird.BIRD_HEIGHT / 2 > canvas.height) {
+                        birds.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        // 更新子彈的位置 (與之前相同)
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.x += bullet.vx;
+                bullet.y += bullet.vy;
+
+                // 移除超出畫布的子彈
+                if (bullet.x < -PLAYER_BULLET_RADIUS || bullet.x > canvas.width + PLAYER_BULLET_RADIUS ||
+                    bullet.y < -PLAYER_BULLET_RADIUS || bullet.y > canvas.height + PLAYER_BULLET_RADIUS) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // 檢查碰撞
+        function checkCollision(bullet, bird) {
+            // 只檢查未死亡的鳥
+            if (bird.isDead) return false;
+
+            const birdX = bird.x - bird.BIRD_LENGTH / 2;
+            const birdY = bird.y - bird.BIRD_HEIGHT / 2;
+
+            return bullet.x + PLAYER_BULLET_RADIUS > birdX &&
+                   bullet.x - PLAYER_BULLET_RADIUS < birdX + bird.BIRD_LENGTH &&
+                   bullet.y + PLAYER_BULLET_RADIUS > birdY &&
+                   bullet.y - PLAYER_BULLET_RADIUS < birdY + bird.BIRD_HEIGHT;
+        }
+
+        // 繪製遊戲元素
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清除畫布
+
+            // 繪製鳥
+            birds.forEach(drawBird);
+
+            // 繪製子彈
+            bullets.forEach(drawBullet);
+
+            // 繪製血液粒子
+            drawParticles();
+
+            // 繪製準心 (只有當遊戲啟動且非暫停狀態時才繪製)
+            if (gameActive && gameStarted) {
+                drawCrosshair();
+            }
+
+            // 繪製分數
+            ctx.fillStyle = 'black';
+            ctx.font = `${SCORE_FONT_SIZE}px Arial`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(`分數: ${score}`, 10, 10);
+
+            // 繪製生命值
+            ctx.textAlign = 'right';
+            ctx.fillText(`生命: ${lives}`, canvas.width - 10, 10);
+        }
+
+        // 更新遊戲邏輯
+        function updateGame(currentTime) {
+            if (!gameActive) return;
+
+            // 生成新鳥
+            if (currentTime - lastBirdSpawnTime > BIRD_SPAWN_INTERVAL) {
+                createBird();
+                lastBirdSpawnTime = currentTime;
+                // 每隔一段時間增加鳥的速度
+                if (score > 0 && score % 500 === 0) { // 每500分加速
+                    birdSpeedMultiplier += 0.1;
+                }
+            }
+
+            updateBirds(currentTime); // 傳入 currentTime 給 updateBirds
+            updateBullets();
+            updateParticles(); // 新增：更新粒子
+
+            // 處理碰撞
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = birds.length - 1; j >= 0; j--) {
+                    const bird = birds[j];
+                    if (checkCollision(bullet, bird)) {
+                        // 擊中鳥，將鳥設為死亡狀態，增加分數，移除子彈
+                        bird.isDead = true;
+                        bird.velocityY = 0; // 重置垂直速度，從靜止開始墜落
+                        score += 100;
+                        bullets.splice(i, 1);
+                        createBloodParticles(bird.x, bird.y); // 新增：在擊中位置生成粒子
+                        break; // 跳出內層循環，因為子彈已經被移除了
+                    }
+                }
+            }
+        }
+
+        // 遊戲主循環
+        function gameLoop(currentTime) {
+            lastTime = currentTime; // 更新 lastTime
+            updateGame(currentTime);
+            drawGame();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // 結束遊戲
+        function endGame() {
+            gameActive = false;
+            gameStarted = false;
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            finalScoreSpan.textContent = score;
+            gameOverScreen.style.display = 'flex';
+            pauseButton.textContent = '暫停';
+        }
+
+        // 開始遊戲
+        function startGame() {
+            gameStartScreen.style.display = 'none';
+            gameActive = true;
+            gameStarted = true;
+            score = 0;
+            lives = INITIAL_LIVES;
+            birds = [];
+            bullets = [];
+            particles = []; // 重置粒子陣列
+            lastBirdSpawnTime = 0;
+            birdSpeedMultiplier = 1;
+            pauseButton.textContent = '暫停';
+            if (!animationFrameId) {
+                 gameLoop(performance.now()); // 啟動時傳入當前時間
+            }
+        }
+
+        // 暫停/恢復遊戲
+        function togglePauseGame() {
+            if (!gameStarted) return;
+
+            if (gameActive) {
+                gameActive = false;
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+                pauseButton.textContent = '恢復';
+            } else {
+                gameActive = true;
+                pauseButton.textContent = '暫停';
+                gameLoop(performance.now());
+            }
+        }
+
+        // 重新開始遊戲
+        function restartGame() {
+            gameOverScreen.style.display = 'none';
+            gameStartScreen.style.display = 'flex';
+            gameActive = false;
+            gameStarted = false;
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            score = 0;
+            lives = INITIAL_LIVES;
+            birds = [];
+            bullets = [];
+            particles = []; // 重置粒子陣列
+            lastBirdSpawnTime = 0;
+            birdSpeedMultiplier = 1;
+            pauseButton.textContent = '暫停';
+        }
+
+        // 事件監聽：滑鼠移動更新準心位置
+        canvas.addEventListener('mousemove', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            crosshairX = event.clientX - rect.left;
+            crosshairY = event.clientY - rect.top;
+        });
+
+        // 事件監聽：滑鼠點擊發射子彈
+        canvas.addEventListener('click', (event) => {
+            if (!gameActive) return;
+
+            const dx = crosshairX - playerShotX;
+            const dy = crosshairY - playerShotY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            const vx = (dx / distance) * PLAYER_BULLET_SPEED;
+            const vy = (dy / distance) * PLAYER_BULLET_SPEED;
+
+            bullets.push({
+                x: playerShotX,
+                y: playerShotY,
+                vx: vx,
+                vy: vy
+            });
+        });
+
+        // 按鈕事件監聽
+        startButton.addEventListener('click', startGame);
+        pauseButton.addEventListener('click', togglePauseGame);
+        restartButton.addEventListener('click', restartGame);
+
+        // 初始狀態：顯示開始畫面，不啟動遊戲循環
+        gameStartScreen.style.display = 'flex';
+        gameActive = false;
+        gameStarted = false;
+    </script>
+</body>
+</html>

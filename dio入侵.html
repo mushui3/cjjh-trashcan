@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS 偽3D火柴人FPS v2</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #333; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { border: 1px solid #000; background: #000; cursor: crosshair; }
+        #gameOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 讓滑鼠事件穿透到canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            color: white;
+            font-size: 1.2em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        #topInfo {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+        }
+        #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            text-align: center;
+            display: none; /* 初始隱藏 */
+            pointer-events: all; /* 遊戲結束時恢復滑鼠事件 */
+        }
+        #gameOverScreen button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 0.8em;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            pointer-events: all; /* 確保按鈕可點擊 */
+        }
+        #gameOverScreen button:hover {
+            background-color: #45a049;
+        }
+        #instructions {
+            background-color: rgba(0,0,0,0.6);
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            text-align: center;
+            align-self: center; /* 讓說明居中 */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="gameOverlay">
+        <div id="topInfo">
+            <div>生命: <span id="playerHealth">100</span></div>
+            <div>分數: <span id="playerScore">0</span></div>
+        </div>
+        <div id="instructions">
+            WASD 移動 | 滑鼠移動 轉動視角 | 滑鼠左鍵 射擊
+        </div>
+    </div>
+
+    <div id="gameOverScreen">
+        <h1>遊戲結束!</h1>
+        <p>你的分數: <span id="finalScore">0</span></p>
+        <button id="restartButton">重新開始</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const playerHealthDisplay = document.getElementById('playerHealth');
+        const playerScoreDisplay = document.getElementById('playerScore');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+
+        // 遊戲設定
+        const CANVAS_WIDTH = 1024;
+        const CANVAS_HEIGHT = 768;
+        const FOV = Math.PI / 3; // 視野 (弧度)
+        const PLAYER_MOVE_SPEED = 0.05; // 玩家移動速度
+        const PLAYER_ROTATION_SPEED = 0.002; // 玩家旋轉速度 (鼠標控制)
+        const ENEMY_BASE_SPEED = 0.012; // 敵人移動速度 (略快)
+        const BULLET_SPEED = 0.4; // 子彈速度 (更快)
+        const FIRE_RATE = 200; // 射擊間隔 (毫秒)
+        const BULLET_DISPLAY_SIZE = 10; // 子彈在螢幕上的基礎大小
+        const ENEMY_VISUAL_HEIGHT = 200; // 敵人火柴人渲染時的基礎高度
+        const ENEMY_COLLISION_RADIUS = 30; // 敵人實際的碰撞半徑 (增加)
+
+        // 玩家狀態
+        let player = {
+            x: 0,
+            y: 0,
+            angle: 0,
+            health: 100,
+            score: 0,
+            lastShotTime: 0,
+            isAlive: true
+        };
+
+        // 敵人列表
+        let enemies = [];
+        const MAX_ENEMIES = 5;
+        const ENEMY_SPAWN_RADIUS_MIN = 500; // 敵人最小生成距離 (確保遠離玩家)
+        const ENEMY_SPAWN_RADIUS_MAX = 1200; // 敵人最大生成距離 (更遠)
+        const ENEMY_ATTACK_RANGE = 20; // 敵人攻擊玩家的範圍 (火柴人與玩家實際距離)
+        const ENEMY_DAMAGE = 0.8; // 敵人每次攻擊造成的傷害 (略高)
+
+        // 子彈列表
+        let bullets = [];
+
+        // 按鍵狀態
+        let keys = {
+            w: false,
+            s: false,
+            a: false,
+            d: false
+        };
+
+        // 鎖定滑鼠指標相關
+        let isPointerLocked = false;
+
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        // --- 事件監聽 ---
+        canvas.addEventListener('click', () => {
+            if (!isPointerLocked && player.isAlive) {
+                canvas.requestPointerLock();
+            }
+        });
+
+        document.addEventListener('pointerlockchange', lockChangeAlert, false);
+        document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
+
+        function lockChangeAlert() {
+            if (document.pointerLockElement === canvas || document.mozPointerLockElement === canvas) {
+                isPointerLocked = true;
+            } else {
+                isPointerLocked = false;
+            }
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (isPointerLocked && player.isAlive) {
+                // 使用 movementX 確保在鎖定狀態下正確的鼠標移動
+                const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
+                player.angle += movementX * PLAYER_ROTATION_SPEED;
+            }
+        });
+
+        document.addEventListener('mousedown', (e) => {
+            if (e.button === 0 && isPointerLocked && player.isAlive) {
+                attemptShoot();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                keys[key] = true;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                keys[key] = false;
+            }
+        });
+
+        restartButton.addEventListener('click', resetGame);
+
+        // --- 遊戲繪製函數 ---
+
+        // 繪製火柴人
+        function drawStickman(ctx, centerX, bottomY, scale, alpha) {
+            const headRadius = 10 * scale;
+            const bodyLength = 40 * scale;
+            const limbLength = 30 * scale;
+            const limbWidth = 2 * scale;
+
+            ctx.save();
+            ctx.globalAlpha = alpha; // 應用透明度
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = limbWidth;
+            ctx.lineCap = 'round';
+
+            // 身體
+            ctx.beginPath();
+            ctx.moveTo(centerX, bottomY - bodyLength - headRadius * 2);
+            ctx.lineTo(centerX, bottomY - headRadius * 2);
+            ctx.stroke();
+
+            // 頭部
+            ctx.beginPath();
+            ctx.arc(centerX, bottomY - bodyLength - headRadius * 3, headRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 左右臂
+            ctx.beginPath();
+            ctx.moveTo(centerX, bottomY - bodyLength - headRadius * 2 + 10 * scale);
+            ctx.lineTo(centerX - limbLength, bottomY - bodyLength - headRadius * 2 + 30 * scale);
+            ctx.moveTo(centerX, bottomY - bodyLength - headRadius * 2 + 10 * scale);
+            ctx.lineTo(centerX + limbLength, bottomY - bodyLength - headRadius * 2 + 30 * scale);
+            ctx.stroke();
+
+            // 左右腿
+            ctx.beginPath();
+            ctx.moveTo(centerX, bottomY - headRadius * 2);
+            ctx.lineTo(centerX - limbLength / 2, bottomY + limbLength);
+            ctx.moveTo(centerX, bottomY - headRadius * 2);
+            ctx.lineTo(centerX + limbLength / 2, bottomY + limbLength);
+            ctx.stroke();
+
+            ctx.restore(); // 恢復畫布狀態
+        }
+
+        // 繪製子彈 (簡化為一個會縮小的方塊)
+        function drawBullet(ctx, relativeDistance) {
+            // 距離越遠，子彈看起來越小
+            const currentBulletSize = BULLET_DISPLAY_SIZE * (1 - relativeDistance / (ENEMY_SPAWN_RADIUS_MAX * 1.5));
+            if (currentBulletSize <= 0) return; // 太遠則不繪製
+
+            const x = CANVAS_WIDTH / 2;
+            const y = CANVAS_HEIGHT / 2 + currentBulletSize / 2; // 從中央略下方發射
+
+            ctx.fillStyle = 'red';
+            ctx.fillRect(x - currentBulletSize / 2, y - currentBulletSize / 2, currentBulletSize, currentBulletSize);
+        }
+
+        // 渲染 3D 視圖
+        function render3DView() {
+            // 清除畫布
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // 繪製天空 (淺藍色)
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+
+            // 繪製地板 (淺綠色)
+            ctx.fillStyle = '#6B8E23';
+            ctx.fillRect(0, CANVAS_HEIGHT / 2, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+
+            // 渲染敵人 (由遠到近渲染，確保遮擋關係正確)
+            // 過濾掉血量 <= 0 的敵人，避免在渲染循環中處理已死亡的敵人
+            const activeEnemies = enemies.filter(enemy => enemy.health > 0);
+            const sortedEnemies = [...activeEnemies].sort((a, b) => b.distance - a.distance);
+
+            sortedEnemies.forEach(enemy => {
+                // 計算敵人相對於玩家的角度
+                let angleToEnemy = Math.atan2(enemy.y - player.y, enemy.x - player.x);
+                let relativeAngle = angleToEnemy - player.angle;
+
+                // 調整角度到 -PI 到 PI 之間
+                if (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+                if (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+
+                // 如果敵人在視野範圍內
+                if (relativeAngle > -FOV / 2 && relativeAngle < FOV / 2) {
+                    // 修正魚眼效果的距離
+                    const correctedDistance = enemy.distance * Math.cos(relativeAngle);
+                    if (correctedDistance <= 0.1) return; // 避免除以零或非常小的數
+
+                    // 計算敵人在螢幕上的X座標
+                    const screenX = (relativeAngle + FOV / 2) * (CANVAS_WIDTH / FOV);
+
+                    // 計算敵人在螢幕上的高度 (與距離成反比)
+                    const enemyHeight = (ENEMY_VISUAL_HEIGHT / correctedDistance) * (CANVAS_HEIGHT / 2);
+                    const scaleFactor = enemyHeight / 100; // 傳給 drawStickman 的縮放因子
+
+                    // 計算敵人的底部Y座標 (站在地板上)
+                    const bottomY = CANVAS_HEIGHT / 2 + enemyHeight / 2;
+
+                    // 根據距離調整透明度
+                    let alpha = Math.max(0.2, 1 - correctedDistance / ENEMY_SPAWN_RADIUS_MAX);
+
+                    drawStickman(ctx, screenX, bottomY, scaleFactor, alpha);
+                }
+            });
+
+            // 渲染子彈 (假設只有一顆子彈在飛行，簡化)
+            if (bullets.length > 0) {
+                // 我們只繪製最新的子彈，並且子彈的距離是從玩家發射點算的
+                drawBullet(ctx, bullets[0].distanceTraveled);
+            }
+
+            // 繪製準星
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(CANVAS_WIDTH / 2 - 10, CANVAS_HEIGHT / 2);
+            ctx.lineTo(CANVAS_WIDTH / 2 + 10, CANVAS_HEIGHT / 2);
+            ctx.moveTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 10);
+            ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 10);
+            ctx.stroke();
+        }
+
+        // --- 遊戲邏輯函數 ---
+
+        function attemptShoot() {
+            const currentTime = Date.now();
+            if (currentTime - player.lastShotTime > FIRE_RATE) {
+                // 每次只允許一顆子彈在飛行
+                bullets = [{
+                    x: player.x,
+                    y: player.y,
+                    angle: player.angle, // 子彈方向與玩家視角一致
+                    distanceTraveled: 0
+                }];
+                player.lastShotTime = currentTime;
+            }
+        }
+
+        function update() {
+            if (!player.isAlive) return; // 遊戲結束，停止更新
+
+            const currentTime = Date.now();
+
+            // --- 玩家移動 ---
+            let moveX = 0;
+            let moveY = 0;
+
+            if (keys.w) {
+                moveX += Math.cos(player.angle) * PLAYER_MOVE_SPEED;
+                moveY += Math.sin(player.angle) * PLAYER_MOVE_SPEED;
+            }
+            if (keys.s) {
+                moveX -= Math.cos(player.angle) * PLAYER_MOVE_SPEED;
+                moveY -= Math.sin(player.angle) * PLAYER_MOVE_SPEED;
+            }
+            if (keys.a) { // 左右平移
+                moveX += Math.cos(player.angle - Math.PI / 2) * PLAYER_MOVE_SPEED;
+                moveY += Math.sin(player.angle - Math.PI / 2) * PLAYER_MOVE_SPEED;
+            }
+            if (keys.d) { // 左右平移
+                moveX += Math.cos(player.angle + Math.PI / 2) * PLAYER_MOVE_SPEED;
+                moveY += Math.sin(player.angle + Math.PI / 2) * PLAYER_MOVE_SPEED;
+            }
+
+            // 將移動量轉換為實際座標變化（與渲染距離相關）
+            // 這裡乘以 CANVAS_WIDTH/2 是為了讓玩家移動速度在遊戲空間中相對可控
+            player.x += moveX * CANVAS_WIDTH / 2;
+            player.y += moveY * CANVAS_HEIGHT / 2;
+
+            // --- 敵人更新 ---
+            enemies.forEach(enemy => {
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                enemy.distance = Math.sqrt(dx * dx + dy * dy);
+
+                // 敵人朝玩家移動
+                if (enemy.distance > ENEMY_ATTACK_RANGE) {
+                    // 根據距離調整速度，讓遠處的敵人感覺移動慢一些
+                    // 使用線性插值，在近處速度接近 BASE_SPEED，遠處逐漸降低
+                    const speedMultiplier = Math.min(1, Math.max(0.1, enemy.distance / ENEMY_SPAWN_RADIUS_MAX)); // 確保不會過慢
+                    enemy.x += dx / enemy.distance * ENEMY_BASE_SPEED * CANVAS_WIDTH * speedMultiplier;
+                    enemy.y += dy / enemy.distance * ENEMY_BASE_SPEED * CANVAS_HEIGHT * speedMultiplier;
+                } else {
+                    // 敵人攻擊玩家
+                    player.health -= ENEMY_DAMAGE;
+                }
+            });
+
+            // 移除血量為零的敵人
+            enemies = enemies.filter(enemy => enemy.health > 0);
+
+            // 生成新敵人
+            while (enemies.length < MAX_ENEMIES) {
+                let newEnemyX, newEnemyY;
+                let validSpawn = false;
+                let attempts = 0;
+                while (!validSpawn && attempts < 100) { // 最多嘗試100次
+                    let angle = Math.random() * Math.PI * 2; // 360度隨機角度
+                    let distance = ENEMY_SPAWN_RADIUS_MIN + Math.random() * (ENEMY_SPAWN_RADIUS_MAX - ENEMY_SPAWN_RADIUS_MIN);
+                    newEnemyX = player.x + Math.cos(angle) * distance;
+                    newEnemyY = player.y + Math.sin(angle) * distance;
+
+                    // 確保新生成的敵人不至於立即與玩家重疊
+                    if (Math.sqrt(Math.pow(newEnemyX - player.x, 2) + Math.pow(newEnemyY - player.y, 2)) > ENEMY_SPAWN_RADIUS_MIN / 2) {
+                        validSpawn = true;
+                    }
+                    attempts++;
+                }
+                if (validSpawn) {
+                    enemies.push({ x: newEnemyX, y: newEnemyY, health: 100, distance: 0 });
+                }
+            }
+
+            // --- 子彈更新與碰撞偵測 ---
+            bullets.forEach((bullet, bulletIndex) => {
+                // 子彈向前移動
+                // 這裡乘以 CANVAS_WIDTH/2 讓子彈速度在遊戲空間中保持一致
+                bullet.x += Math.cos(bullet.angle) * BULLET_SPEED * CANVAS_WIDTH / 2;
+                bullet.y += Math.sin(bullet.angle) * BULLET_SPEED * CANVAS_HEIGHT / 2;
+                bullet.distanceTraveled += BULLET_SPEED * CANVAS_WIDTH / 2;
+
+                // 檢查子彈是否擊中敵人
+                // 因為我們只有一顆在飛行的子彈，且假設它始終在準星方向
+                // 我們可以簡化為檢查準星方向最近的敵人是否被擊中
+                let hitEnemyThisFrame = false;
+                for (let i = 0; i < enemies.length; i++) {
+                    const enemy = enemies[i];
+                    const distToEnemy = Math.sqrt(Math.pow(bullet.x - enemy.x, 2) + Math.pow(bullet.y - enemy.y, 2));
+
+                    // 簡易碰撞檢測：如果子彈在敵人擴大的碰撞半徑內
+                    if (distToEnemy < ENEMY_COLLISION_RADIUS) {
+                        enemy.health -= 50; // 傷害敵人
+                        if (enemy.health <= 0) {
+                            player.score += 100; // 增加分數
+                        }
+                        hitEnemyThisFrame = true;
+                        break; // 擊中一個敵人後就停止檢查這顆子彈
+                    }
+                }
+
+                if (hitEnemyThisFrame) {
+                    bullets.splice(bulletIndex, 1); // 移除子彈
+                }
+            });
+
+            // 移除超出射程的子彈 (子彈最大射程設為敵人最大生成距離的1.5倍)
+            bullets = bullets.filter(bullet => bullet.distanceTraveled < ENEMY_SPAWN_RADIUS_MAX * 1.5);
+
+
+            // --- 遊戲結束判斷 ---
+            if (player.health <= 0) {
+                player.health = 0;
+                player.isAlive = false;
+                gameOverScreen.style.display = 'flex';
+                finalScoreDisplay.textContent = player.score;
+                // 釋放滑鼠指標鎖定
+                if (document.exitPointerLock) {
+                    document.exitPointerLock();
+                } else if (document.mozExitPointerLock) {
+                    document.mozExitPointerLock();
+                }
+            }
+
+            // --- 更新UI ---
+            playerHealthDisplay.textContent = Math.floor(player.health);
+            playerScoreDisplay.textContent = player.score;
+        }
+
+        // --- 遊戲重置 ---
+        let animationFrameId = null;
+        function resetGame() {
+            player = {
+                x: 0,
+                y: 0,
+                angle: 0,
+                health: 100,
+                score: 0,
+                lastShotTime: 0,
+                isAlive: true
+            };
+            enemies = [];
+            bullets = [];
+            gameOverScreen.style.display = 'none';
+            // 重新請求滑鼠鎖定，為遊戲開始做準備
+            canvas.requestPointerLock();
+            // 確保停止舊的循環，避免重複啟動
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            gameLoop(); // 重新啟動遊戲循環
+        }
+
+        // --- 遊戲主循環 ---
+        function gameLoop() {
+            if (player.isAlive) {
+                update(); // 更新遊戲邏輯
+                render3DView(); // 渲染3D場景
+                animationFrameId = requestAnimationFrame(gameLoop); // 請求下一幀動畫
+            } else {
+                // 遊戲結束時，不再請求下一幀
+            }
+        }
+
+        // 啟動遊戲
+        gameLoop();
+    </script>
+</body>
+</html>

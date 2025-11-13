@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>吃不各</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #000;
+            overflow: hidden;
+            margin: 0;
+            perspective: 1500px; /* 更強的 3D 視角 */
+            font-family: 'Press Start 2P', cursive;
+            cursor: none; /* 隱藏滑鼠游標 */
+        }
+        canvas {
+            border: 2px solid #fff;
+            background-color: #000;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: all 0.03s ease-out; /* 極快的過渡，實現極度順滑 */
+            box-shadow: 0 0 50px rgba(255, 0, 255, 0.7), 0 0 100px rgba(0, 255, 255, 0.5), 0 0 150px rgba(255, 255, 0, 0.3); /* 多重霓虹光暈 */
+        }
+        #score {
+            position: absolute;
+            top: 20px;
+            color: #fff;
+            font-size: 2.5em; /* 更大的分數 */
+            text-shadow: 0 0 15px #f0f, 0 0 30px #0ff, 0 0 50px #ff0; /* 多重文字陰影 */
+            z-index: 100;
+        }
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9em;
+            text-align: center;
+            text-shadow: 0 0 5px #fff;
+            z-index: 100;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="score">玩家1: 0 | 玩家2: 0</div>
+    <canvas id="pongCanvas" width="800" height="600"></canvas>
+    <div class="instructions">
+        玩家1: **W**/**S** | 玩家2: **↑**/**↓** <br>
+        按 **P** 鍵切換致幻模式 | 按 **R** 鍵重新開始
+    </div>
+
+    <script>
+        const canvas = document.getElementById('pongCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 遊戲變數
+        const paddleWidth = 10;
+        const paddleHeight = 100;
+        let player1Y = (canvas.height - paddleHeight) / 2;
+        let player2Y = (canvas.height - paddleHeight) / 2;
+        let ballX = canvas.width / 2;
+        let ballY = canvas.height / 2;
+        let ballSpeedX = 8; // 更快的球速
+        let ballSpeedY = 8;
+        const ballRadius = 8;
+        let player1Score = 0;
+        let player2Score = 0;
+        const winningScore = 5;
+
+        // 致幻效果相關變數 - 平滑過渡
+        let targetHueRotate = 0;
+        let currentHueRotate = 0;
+
+        let targetBlurAmount = 0;
+        let currentBlurAmount = 0;
+
+        let targetScaleAmount = 1;
+        let currentScaleAmount = 1;
+
+        let targetTranslateX = 0;
+        let currentTranslateX = 0;
+        let targetTranslateY = 0;
+        let currentTranslateY = 0;
+
+        let targetRotateX = 0;
+        let currentRotateX = 0;
+        let targetRotateY = 0;
+        let currentRotateY = 0;
+        let targetRotateZ = 0;
+        let currentRotateZ = 0;
+
+        let targetDistortionIntensity = 0; // 用於控制亮度、3D旋轉等
+        let currentDistortionIntensity = 0;
+
+        let targetTrailLength = 0;
+        let currentTrailLength = 0;
+
+        let targetColorCycleSpeed = 1; // 預設顏色循環更快
+        let currentColorCycleSpeed = 1;
+
+        let psychedelicMode = false;
+        const easingFactor = 0.08; // 更快的平滑過渡
+
+        // 球的殘影
+        const ballTrail = [];
+        const maxTrailPoints = 40;
+
+        // 流體能量點
+        const energyPoints = [];
+        const maxEnergyPoints = 15; // 螢幕上的最大能量點數量
+        const energyPointSpawnRate = 30; // 每N幀嘗試生成一個新點
+        let energyPointCounter = 0;
+
+        // 按鍵控制
+        const keysPressed = {};
+        document.addEventListener('keydown', (e) => {
+            keysPressed[e.key] = true;
+            if (e.key === 'r' || e.key === 'R') {
+                resetGame();
+            }
+            if (e.key === 'p' || e.key === 'P') {
+                psychedelicMode = !psychedelicMode;
+                if (!psychedelicMode) {
+                    // 關閉致幻模式時，立即重置目標值
+                    resetEffectTargets();
+                } else {
+                    // 開啟致幻模式時，立即觸發一次強烈效果
+                    triggerStrongEffect();
+                }
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            keysPressed[e.key] = false;
+        });
+
+        function resetEffectTargets() {
+            targetHueRotate = currentHueRotate; // 保持當前色相，讓它自然過渡
+            targetBlurAmount = 0;
+            targetScaleAmount = 1;
+            targetTranslateX = 0;
+            targetTranslateY = 0;
+            targetRotateX = 0;
+            targetRotateY = 0;
+            targetRotateZ = 0;
+            targetDistortionIntensity = 0;
+            targetTrailLength = 0;
+            targetColorCycleSpeed = 1;
+        }
+
+        function triggerStrongEffect() {
+            targetHueRotate = (currentHueRotate + 180) % 360;
+            targetBlurAmount = 8;
+            targetScaleAmount = 1.4;
+            targetTranslateX = (Math.random() - 0.5) * 150;
+            targetTranslateY = (Math.random() - 0.5) * 150;
+            targetDistortionIntensity = 100;
+            targetTrailLength = 200;
+            targetColorCycleSpeed = 20;
+            targetRotateX = (Math.random() - 0.5) * 120;
+            targetRotateY = (Math.random() - 0.5) * 120;
+            targetRotateZ = (Math.random() - 0.5) * 120;
+        }
+
+        function movePaddles() {
+            if (keysPressed['w'] || keysPressed['W']) {
+                player1Y -= 10; // 更快的球拍移動
+            }
+            if (keysPressed['s'] || keysPressed['S']) {
+                player1Y += 10;
+            }
+            if (keysPressed['ArrowUp']) {
+                player2Y -= 10;
+            }
+            if (keysPressed['ArrowDown']) {
+                player2Y += 10;
+            }
+            player1Y = Math.max(0, Math.min(player1Y, canvas.height - paddleHeight));
+            player2Y = Math.max(0, Math.min(player2Y, canvas.height - paddleHeight));
+        }
+
+        function moveBall() {
+            ballX += ballSpeedX;
+            ballY += ballSpeedY;
+
+            // 添加球的歷史位置
+            ballTrail.push({ x: ballX, y: ballY, color: `hsl(${currentHueRotate}, 100%, 70%)`, radius: ballRadius });
+            if (ballTrail.length > maxTrailPoints) {
+                ballTrail.shift();
+            }
+
+            // 碰到上下邊界反彈
+            if (ballY + ballRadius > canvas.height || ballY - ballRadius < 0) {
+                ballSpeedY *= -1;
+                if (psychedelicMode) {
+                    targetDistortionIntensity = Math.min(targetDistortionIntensity + 10, 150);
+                    targetTrailLength = Math.min(targetTrailLength + 20, 300);
+                    targetColorCycleSpeed = Math.min(targetColorCycleSpeed + 1, 30);
+                    targetRotateX = (Math.random() - 0.5) * 90;
+                    targetRotateY = (Math.random() - 0.5) * 90;
+                    targetRotateZ = (Math.random() - 0.5) * 90;
+                    targetBlurAmount = Math.min(targetBlurAmount + 2, 15);
+                    targetScaleAmount = Math.min(targetScaleAmount + 0.05, 1.5);
+                    targetTranslateX = (Math.random() - 0.5) * 100;
+                    targetTranslateY = (Math.random() - 0.5) * 100;
+                }
+            }
+
+            // 碰到左右邊界 (得分)
+            if (ballX - ballRadius < 0) {
+                player2Score++;
+                updateScore();
+                resetBall();
+            }
+            if (ballX + ballRadius > canvas.width) {
+                player1Score++;
+                updateScore();
+                resetBall();
+            }
+
+            // 碰撞檢測 - 玩家1球拍
+            if (ballX - ballRadius < paddleWidth && ballY + ballRadius > player1Y && ballY - ballRadius < player1Y + paddleHeight) {
+                ballSpeedX *= -1;
+                let collidePoint = ballY - (player1Y + paddleHeight / 2);
+                ballSpeedY = collidePoint * 0.3; // 更靈敏的擊球角度
+
+                if (psychedelicMode) {
+                    targetHueRotate = (targetHueRotate + 120) % 360;
+                    targetBlurAmount = Math.min(targetBlurAmount + 3, 20);
+                    targetScaleAmount = Math.min(targetScaleAmount + 0.03, 1.6);
+                    targetTranslateX = (Math.random() - 0.5) * 200;
+                    targetTranslateY = (Math.random() - 0.5) * 200;
+                    targetDistortionIntensity = Math.min(targetDistortionIntensity + 20, 200);
+                    targetTrailLength = Math.min(targetTrailLength + 30, 400);
+                    targetColorCycleSpeed = Math.min(targetColorCycleSpeed + 2, 50);
+                    targetRotateX = (Math.random() - 0.5) * 180;
+                    targetRotateY = (Math.random() - 0.5) * 180;
+                    targetRotateZ = (Math.random() - 0.5) * 180;
+                }
+            }
+
+            // 碰撞檢測 - 玩家2球拍
+            if (ballX + ballRadius > canvas.width - paddleWidth && ballY + ballRadius > player2Y && ballY - ballRadius < player2Y + paddleHeight) {
+                ballSpeedX *= -1;
+                let collidePoint = ballY - (player2Y + paddleHeight / 2);
+                ballSpeedY = collidePoint * 0.3;
+
+                if (psychedelicMode) {
+                    targetHueRotate = (targetHueRotate + 120) % 360;
+                    targetBlurAmount = Math.min(targetBlurAmount + 3, 20);
+                    targetScaleAmount = Math.min(targetScaleAmount + 0.03, 1.6);
+                    targetTranslateX = (Math.random() - 0.5) * 200;
+                    targetTranslateY = (Math.random() - 0.5) * 200;
+                    targetDistortionIntensity = Math.min(targetDistortionIntensity + 20, 200);
+                    targetTrailLength = Math.min(targetTrailLength + 30, 400);
+                    targetColorCycleSpeed = Math.min(targetColorCycleSpeed + 2, 50);
+                    targetRotateX = (Math.random() - 0.5) * 180;
+                    targetRotateY = (Math.random() - 0.5) * 180;
+                    targetRotateZ = (Math.random() - 0.5) * 180;
+                }
+            }
+
+            // 致幻效果目標值緩慢衰減
+            if (psychedelicMode) {
+                targetBlurAmount *= 0.93;
+                targetScaleAmount = 1 + (targetScaleAmount - 1) * 0.93;
+                targetTranslateX *= 0.88;
+                targetTranslateY *= 0.88;
+                targetDistortionIntensity *= 0.88;
+                targetTrailLength *= 0.8;
+                targetColorCycleSpeed = 1 + (targetColorCycleSpeed - 1) * 0.93;
+                targetRotateX *= 0.88;
+                targetRotateY *= 0.88;
+                targetRotateZ *= 0.88;
+            } else {
+                resetEffectTargets(); // 平滑歸零
+            }
+        }
+
+        // 平滑過渡函數
+        function easeValue(current, target, factor) {
+            return current + (target - current) * factor;
+        }
+
+        // 更新致幻效果的當前值
+        function updatePsychedelicEffects() {
+            currentHueRotate = (currentHueRotate + currentColorCycleSpeed) % 360;
+            currentBlurAmount = easeValue(currentBlurAmount, targetBlurAmount, easingFactor);
+            currentScaleAmount = easeValue(currentScaleAmount, targetScaleAmount, easingFactor);
+            currentTranslateX = easeValue(currentTranslateX, targetTranslateX, easingFactor);
+            currentTranslateY = easeValue(currentTranslateY, targetTranslateY, easingFactor);
+            currentDistortionIntensity = easeValue(currentDistortionIntensity, targetDistortionIntensity, easingFactor);
+            currentTrailLength = easeValue(currentTrailLength, targetTrailLength, easingFactor);
+            currentColorCycleSpeed = easeValue(currentColorCycleSpeed, targetColorCycleSpeed, easingFactor);
+            currentRotateX = easeValue(currentRotateX, targetRotateX, easingFactor);
+            currentRotateY = easeValue(currentRotateY, targetRotateY, easingFactor);
+            currentRotateZ = easeValue(currentRotateZ, targetRotateZ, easingFactor);
+
+            if (psychedelicMode || currentBlurAmount > 0.1 || currentScaleAmount !== 1 || currentTranslateX !== 0 || currentTranslateY !== 0 || currentDistortionIntensity > 0.1 || currentRotateX !== 0 || currentRotateY !== 0 || currentRotateZ !== 0) {
+                canvas.style.filter = `hue-rotate(${currentHueRotate}deg) blur(${currentBlurAmount}px) brightness(${1 + currentDistortionIntensity / 100})`;
+                canvas.style.transform = `scale(${currentScaleAmount}) translateX(${currentTranslateX}px) translateY(${currentTranslateY}px) rotateX(${currentRotateX}deg) rotateY(${currentRotateY}deg) rotateZ(${currentRotateZ}deg)`;
+                document.body.style.backgroundColor = `hsl(${currentHueRotate}, 100%, ${5 + currentDistortionIntensity / 10}%)`; // 背景色也隨之變化，亮度也受扭曲影響
+            } else {
+                canvas.style.filter = '';
+                canvas.style.transform = '';
+                document.body.style.backgroundColor = '#000';
+            }
+        }
+
+        // 更新和生成能量點
+        function updateEnergyPoints() {
+            if (!psychedelicMode) {
+                energyPoints.length = 0; // 非致幻模式下清空點
+                return;
+            }
+
+            energyPointCounter++;
+            if (energyPointCounter >= energyPointSpawnRate && energyPoints.length < maxEnergyPoints) {
+                energyPoints.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: 5 + Math.random() * 15 * (currentDistortionIntensity / 100 + 0.5), // 半徑受扭曲影響
+                    speedX: (Math.random() - 0.5) * 10 * (currentDistortionIntensity / 100 + 0.5),
+                    speedY: (Math.random() - 0.5) * 10 * (currentDistortionIntensity / 100 + 0.5),
+                    alpha: 1,
+                    hue: (currentHueRotate + Math.random() * 360) % 360,
+                    life: 100 // 點的生命週期
+                });
+                energyPointCounter = 0;
+            }
+
+            for (let i = energyPoints.length - 1; i >= 0; i--) {
+                const p = energyPoints[i];
+                p.x += p.speedX;
+                p.y += p.speedY;
+                p.alpha -= 0.01; // 逐漸消失
+                p.life--;
+
+                // 點碰到邊界反彈
+                if (p.x < 0 || p.x > canvas.width) p.speedX *= -1;
+                if (p.y < 0 || p.y > canvas.height) p.speedY *= -1;
+
+                if (p.alpha <= 0 || p.life <= 0) {
+                    energyPoints.splice(i, 1);
+                }
+            }
+        }
+
+
+        function resetBall() {
+            ballX = canvas.width / 2;
+            ballY = canvas.height / 2;
+            ballSpeedX *= -1;
+            ballSpeedY = (Math.random() - 0.5) * 15; // 更大的隨機Y方向速度
+            if (psychedelicMode) {
+                targetHueRotate = (targetHueRotate + 180) % 360;
+                targetBlurAmount = 5;
+                targetScaleAmount = 1.25;
+                targetTranslateX = (Math.random() - 0.5) * 80;
+                targetTranslateY = (Math.random() - 0.5) * 80;
+                targetDistortionIntensity = 50;
+                targetTrailLength = 150;
+                targetColorCycleSpeed = 10;
+                targetRotateX = (Math.random() - 0.5) * 60;
+                targetRotateY = (Math.random() - 0.5) * 60;
+                targetRotateZ = (Math.random() - 0.5) * 60;
+            }
+            ballTrail.length = 0;
+        }
+
+        function updateScore() {
+            document.getElementById('score').innerText = `玩家1: ${player1Score} | 玩家2: ${player2Score}`;
+            checkWin();
+        }
+
+        function checkWin() {
+            if (player1Score >= winningScore) {
+                alert('玩家1獲勝！按 R 鍵重新開始。');
+                resetGame();
+            } else if (player2Score >= winningScore) {
+                alert('玩家2獲勝！按 R 鍵重新開始。');
+                resetGame();
+            }
+        }
+
+        function resetGame() {
+            player1Score = 0;
+            player2Score = 0;
+            updateScore();
+            resetBall();
+            psychedelicMode = false;
+
+            resetEffectTargets(); // 重置所有效果目標值
+            currentHueRotate = 0; // 硬重置當前色相
+            currentColorCycleSpeed = 1; // 硬重置顏色循環速度
+
+            canvas.style.filter = '';
+            canvas.style.transform = '';
+            document.body.style.backgroundColor = '#000';
+            ballTrail.length = 0;
+            energyPoints.length = 0;
+        }
+
+        function draw() {
+            // 清空畫布，帶有殘影效果
+            ctx.fillStyle = `rgba(0, 0, 0, ${1 - Math.min(currentTrailLength / 400, 0.98)})`; // 更高的透明度，更多殘影
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 繪製能量點
+            for (const p of energyPoints) {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${p.hue}, 100%, 70%, ${p.alpha})`;
+                ctx.shadowColor = `hsla(${p.hue}, 100%, 70%, ${p.alpha})`; // 讓點發光
+                ctx.shadowBlur = p.radius * 2;
+                ctx.fill();
+                ctx.shadowBlur = 0; // 重置陰影
+            }
+
+            // 繪製球的殘影
+            for (let i = 0; i < ballTrail.length; i++) {
+                const trailPoint = ballTrail[i];
+                const opacity = i / ballTrail.length;
+                const radius = trailPoint.radius * (0.3 + 0.7 * opacity); // 殘影越淡越小
+                ctx.beginPath();
+                ctx.arc(trailPoint.x, trailPoint.y, radius, 0, Math.PI * 2);
+                const trailColor = trailPoint.color.replace(')', `, ${opacity})`).replace('hsl', 'hsla');
+                ctx.fillStyle = trailColor;
+                ctx.fill();
+            }
+
+            // 畫玩家1球拍
+            ctx.fillStyle = `hsl(${(currentHueRotate + 0) % 360}, 100%, 60%)`;
+            ctx.fillRect(0, player1Y, paddleWidth, paddleHeight);
+
+            // 畫玩家2球拍
+            ctx.fillStyle = `hsl(${(currentHueRotate + 180) % 360}, 100%, 60%)`;
+            ctx.fillRect(canvas.width - paddleWidth, player2Y, paddleWidth, paddleHeight);
+
+            // 畫球
+            ctx.beginPath();
+            ctx.arc(ballX, ballY, ballRadius, 0, Math.PI * 2);
+            ctx.fillStyle = `hsl(${(currentHueRotate + 90) % 360}, 100%, 80%)`;
+            ctx.fill();
+
+            // 畫場地中間線 (虛線)
+            ctx.strokeStyle = `hsl(${(currentHueRotate + 270) % 360}, 100%, 90%)`;
+            ctx.setLineDash([10 + currentDistortionIntensity / 10, 15 + currentDistortionIntensity / 5]);
+            ctx.lineWidth = 2 + currentDistortionIntensity / 50; // 線條粗細也變化
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineWidth = 1; // 重置線條粗細
+
+
+            // 嘗試進行像素級扭曲 (會影響效能，且效果有限)
+            if (psychedelicMode && currentDistortionIntensity > 50) {
+                try {
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = canvas.width;
+                    tempCanvas.height = canvas.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.putImageData(imageData, 0, 0);
+
+                    // 這裡只是簡單的像素偏移，不是真正的流體扭曲
+                    // 更複雜的演算法才能實現更真實的流體效果
+                    for (let y = 0; y < canvas.height; y++) {
+                        for (let x = 0; x < canvas.width; x++) {
+                            const offset = Math.sin(x * 0.05 + y * 0.03 + Date.now() * 0.005) * currentDistortionIntensity / 50;
+                            const newX = Math.floor(x + offset);
+                            const newY = Math.floor(y + offset);
+
+                            if (newX >= 0 && newX < canvas.width && newY >= 0 && newY < canvas.height) {
+                                const sourceIndex = (newY * canvas.width + newX) * 4;
+                                const destIndex = (y * canvas.width + x) * 4;
+                                data[destIndex] = tempCtx.getImageData(newX, newY, 1, 1).data[0];
+                                data[destIndex + 1] = tempCtx.getImageData(newX, newY, 1, 1).data[1];
+                                data[destIndex + 2] = tempCtx.getImageData(newX, newY, 1, 1).data[2];
+                                data[destIndex + 3] = tempCtx.getImageData(newX, newY, 1, 1).data[3];
+                            }
+                        }
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+                } catch (e) {
+                    // 如果跨域或者其他原因導致 getImageData 失敗，跳過
+                    console.warn("Could not apply pixel distortion:", e);
+                }
+            }
+        }
+
+
+        function gameLoop() {
+            movePaddles();
+            moveBall();
+            updatePsychedelicEffects();
+            updateEnergyPoints();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        resetGame();
+        gameLoop();
+    </script>
+</body>
+</html>
