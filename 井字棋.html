@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>井字棋 - 多尺寸 + 多AI策略 + 10x10 計分制</title>
+<style>
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh;
+    font-family: Arial, sans-serif;
+    background: #eee;
+    margin: 0;
+  }
+  canvas {
+    background: #fff;
+    border: 2px solid #333;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    margin-top: 10px;
+    width: 300px;
+    height: 300px;
+  }
+  #message {
+    margin-top: 15px;
+    font-size: 24px;
+    color: #333;
+    min-height: 28px;
+  }
+  #resetBtn {
+    margin-top: 15px;
+    padding: 10px 20px;
+    font-size: 18px;
+    border: none;
+    border-radius: 5px;
+    background-color: #4caf50;
+    color: white;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  #resetBtn:hover {
+    background-color: #45a049;
+  }
+  select, label {
+    font-size: 18px;
+    margin: 5px 10px 0 0;
+  }
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+</style>
+</head>
+<body>
+
+  <div id="controls">
+    <label for="boardSizeSelector">棋盤尺寸：</label>
+    <select id="boardSizeSelector">
+      <option value="3,3">3 x 3</option>
+      <option value="3,4">3 x 4</option>
+      <option value="4,4">4 x 4</option>
+      <option value="5,5">5 x 5</option>
+      <option value="10,10">10 x 10</option>
+    </select>
+
+    <label for="modeSelector">模式：</label>
+    <select id="modeSelector">
+      <option value="2p">雙人</option>
+      <option value="1p">單人 (對電腦)</option>
+    </select>
+
+    <label for="aiStrategySelector">AI 策略：</label>
+    <select id="aiStrategySelector">
+      <option value="random">隨機漫步</option>
+      <option value="win">殺手鐧優先</option>
+      <option value="defense">防守＋殺手鐧</option>
+    </select>
+  </div>
+
+  <canvas id="game" width="300" height="300"></canvas>
+  <div id="message">輪到 X 下</div>
+  <button id="resetBtn">重新開始</button>
+
+<script>
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const message = document.getElementById('message');
+  const resetBtn = document.getElementById('resetBtn');
+  const boardSizeSelector = document.getElementById('boardSizeSelector');
+  const modeSelector = document.getElementById('modeSelector');
+  const aiStrategySelector = document.getElementById('aiStrategySelector');
+
+  const canvasSize = 300;
+  let rows = 3;
+  let cols = 3;
+  let cellWidth, cellHeight;
+  let board;
+  let currentPlayer;
+  let gameOver;
+  let mode;
+  let aiStrategy;
+
+  function initGame() {
+    board = Array(rows * cols).fill(null);
+    currentPlayer = 'X';
+    gameOver = false;
+    mode = modeSelector.value;
+    aiStrategy = aiStrategySelector.value;
+    cellWidth = canvasSize / cols;
+    cellHeight = canvasSize / rows;
+    message.textContent = `輪到 ${currentPlayer} 下`;
+    render();
+
+    if (mode === '1p' && currentPlayer === 'O') {
+      setTimeout(computerMove, 300);
+    }
+  }
+
+  function drawGrid() {
+    ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#444';
+
+    for(let c = 1; c < cols; c++) {
+      ctx.beginPath();
+      ctx.moveTo(cellWidth * c, 0);
+      ctx.lineTo(cellWidth * c, canvasSize);
+      ctx.stroke();
+    }
+    for(let r = 1; r < rows; r++) {
+      ctx.beginPath();
+      ctx.moveTo(0, cellHeight * r);
+      ctx.lineTo(canvasSize, cellHeight * r);
+      ctx.stroke();
+    }
+  }
+
+  function drawX(x, y) {
+    const padding = Math.min(cellWidth, cellHeight) * 0.2;
+    ctx.strokeStyle = '#e74c3c';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x + padding, y + padding);
+    ctx.lineTo(x + cellWidth - padding, y + cellHeight - padding);
+    ctx.moveTo(x + cellWidth - padding, y + padding);
+    ctx.lineTo(x + padding, y + cellHeight - padding);
+    ctx.stroke();
+  }
+
+  function drawO(x, y) {
+    const radius = Math.min(cellWidth, cellHeight) / 2 - Math.min(cellWidth, cellHeight) * 0.2;
+    ctx.strokeStyle = '#3498db';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x + cellWidth/2, y + cellHeight/2, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawMarks() {
+    for(let i = 0; i < board.length; i++) {
+      const mark = board[i];
+      if(mark) {
+        const x = (i % cols) * cellWidth;
+        const y = Math.floor(i / cols) * cellHeight;
+        if(mark === 'X') drawX(x, y);
+        else if(mark === 'O') drawO(x, y);
+      }
+    }
+  }
+
+  // 檢查小尺寸連3贏 (3～5)
+  function checkWinnerStandard(bd) {
+    const N = 3; // 連3判定
+    for(let r = 0; r < rows; r++) {
+      for(let c = 0; c < cols; c++) {
+        const start = r * cols + c;
+        const player = bd[start];
+        if(!player) continue;
+
+        const directions = [
+          {dr:0, dc:1}, {dr:1, dc:0}, {dr:1, dc:1}, {dr:1, dc:-1}
+        ];
+        for(const {dr, dc} of directions) {
+          let count = 1;
+          let rr = r + dr;
+          let cc = c + dc;
+          while(count < N &&
+                rr >=0 && rr < rows &&
+                cc >=0 && cc < cols &&
+                bd[rr * cols + cc] === player) {
+            count++;
+            rr += dr;
+            cc += dc;
+          }
+          if(count === N) return player;
+        }
+      }
+    }
+    if(!bd.includes(null)) return '平手';
+    return null;
+  }
+
+  // 10x10 計分模式：掃描全部線條長度≥3數量
+  // 計算X和O分數，回傳物件 {X:分數, O:分數}
+  function countLines10x10(bd) {
+    let scores = {X:0, O:0};
+    // 找連線方向
+    const directions = [
+      {dr:0, dc:1}, {dr:1, dc:0}, {dr:1, dc:1}, {dr:1, dc:-1}
+    ];
+    function checkLine(r,c,dr,dc) {
+      let player = bd[r*cols + c];
+      if(!player) return 0;
+      let length = 1;
+      let rr = r + dr;
+      let cc = c + dc;
+      while(rr >= 0 && rr < rows && cc >=0 && cc < cols && bd[rr*cols + cc] === player) {
+        length++;
+        rr += dr;
+        cc += dc;
+      }
+      return length;
+    }
+    // 掃描棋盤每格，每個方向判斷線長，長度>=3就加分，且只算起點（避免重複算）
+    for(let r = 0; r < rows; r++) {
+      for(let c = 0; c < cols; c++) {
+        for(let d of directions) {
+          // 起點條件：前一格不是同一玩家，才算新線
+          let pr = r - d.dr;
+          let pc = c - d.dc;
+          if(pr >= 0 && pr < rows && pc >= 0 && pc < cols && bd[pr*cols + pc] === bd[r*cols + c]) {
+            continue; // 不是起點，跳過
+          }
+          let length = checkLine(r,c,d.dr,d.dc);
+          if(length >= 3) {
+            scores[bd[r*cols + c]] += 1;
+          }
+        }
+      }
+    }
+    return scores;
+  }
+
+  // 主勝負判斷，根據尺寸決定
+  function checkWinner(bd) {
+    if(rows === 10 && cols === 10) {
+      // 10x10特殊判定：棋盤填滿才判分
+      if(bd.includes(null)) return null; // 仍有空格，不結束
+      let scores = countLines10x10(bd);
+      if(scores.X > scores.O) return 'X';
+      if(scores.O > scores.X) return 'O';
+      return '平手';
+    } else {
+      return checkWinnerStandard(bd);
+    }
+  }
+
+  function getCellIndex(x, y) {
+    const col = Math.floor(x / cellWidth);
+    const row = Math.floor(y / cellHeight);
+    if(col >= cols || row >= rows) return -1;
+    return row * cols + col;
+  }
+
+  function render() {
+    drawGrid();
+    drawMarks();
+  }
+
+  aiStrategySelector.addEventListener('change', () => {
+    aiStrategy = aiStrategySelector.value;
+  });
+
+  boardSizeSelector.addEventListener('change', () => {
+    const val = boardSizeSelector.value.split(',');
+    rows = parseInt(val[0]);
+    cols = parseInt(val[1]);
+    initGame();
+  });
+
+  modeSelector.addEventListener('change', () => {
+    initGame();
+  });
+
+  resetBtn.addEventListener('click', () => {
+    initGame();
+  });
+
+  // 找能直接贏的格子（殺手鐧）
+  function findWinningMove(board, player) {
+    for(let i = 0; i < board.length; i++) {
+      if(board[i] === null) {
+        board[i] = player;
+        if(checkWinnerStandard(board) === player) { // 只用連3判定
+          board[i] = null;
+          return i;
+        }
+        board[i] = null;
+      }
+    }
+    return -1;
+  }
+
+  function computerMove() {
+    if(gameOver) return;
+
+    let move = -1;
+
+    if(aiStrategy === 'random') {
+      // 隨機漫步
+      const empties = board.map((v,i) => v === null ? i : -1).filter(i => i !== -1);
+      if(empties.length === 0) return;
+      move = empties[Math.floor(Math.random() * empties.length)];
+
+    } else if(aiStrategy === 'win') {
+      // 先找能直接贏的
+      move = findWinningMove(board, currentPlayer);
+      if(move === -1) {
+        const empties = board.map((v,i) => v === null ? i : -1).filter(i => i !== -1);
+        if(empties.length === 0) return;
+        move = empties[Math.floor(Math.random() * empties.length)];
+      }
+
+    } else if(aiStrategy === 'defense') {
+      // 先找能直接贏的
+      move = findWinningMove(board, currentPlayer);
+      if(move === -1) {
+        // 擋對方贏
+        const opponent = currentPlayer === 'X' ? 'O' : 'X';
+        move = findWinningMove(board, opponent);
+      }
+      if(move === -1) {
+        const empties = board.map((v,i) => v === null ? i : -1).filter(i => i !== -1);
+        if(empties.length === 0) return;
+        move = empties[Math.floor(Math.random() * empties.length)];
+      }
+    }
+
+    if(move !== -1) {
+      board[move] = currentPlayer;
+      currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+      render();
+      const winner = checkWinner(board);
+      if(winner) {
+        gameOver = true;
+        if(winner === '平手') message.textContent = "平手了！";
+        else message.textContent = `${winner} 贏了！`;
+      } else {
+        message.textContent = `輪到 ${currentPlayer} 下`;
+        if(mode === '1p' && currentPlayer === 'O') {
+          setTimeout(computerMove, 300);
+        }
+      }
+    }
+  }
+
+  canvas.addEventListener('click', (e) => {
+    if(gameOver) return;
+    if(mode === '1p' && currentPlayer === 'O') return; // 電腦回合不讓人點
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const idx = getCellIndex(x, y);
+    if(idx === -1 || board[idx] !== null) return;
+
+    board[idx] = currentPlayer;
+    currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+    render();
+    const winner = checkWinner(board);
+    if(winner) {
+      gameOver = true;
+      if(winner === '平手') message.textContent = "平手了！";
+      else message.textContent = `${winner} 贏了！`;
+    } else {
+      message.textContent = `輪到 ${currentPlayer} 下`;
+      if(mode === '1p' && currentPlayer === 'O') {
+        setTimeout(computerMove, 300);
+      }
+    }
+  });
+
+  // 初始化遊戲
+  initGame();
+</script>
+
+</body>
+</html>

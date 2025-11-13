@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>黑白棋 - AI模式</title>
+<style>
+  body {
+    background: #222;
+    color: #eee;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0;
+    padding: 20px;
+    user-select: none;
+  }
+  h1 {
+    margin-bottom: 10px;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(8, 40px);
+    grid-template-rows: repeat(8, 40px);
+    gap: 2px;
+    background: #444;
+    border: 3px solid #666;
+  }
+  .cell {
+    width: 40px;
+    height: 40px;
+    background: #0a0a0a;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+  }
+  .cell:hover {
+    background: #222;
+  }
+  .disc {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    transition: background-color 0.3s ease;
+  }
+  .black {
+    background: gray;
+  }
+  .white {
+    background: white;
+  }
+  #status {
+    margin-top: 15px;
+    font-size: 18px;
+    min-height: 24px;
+  }
+  #scores {
+    margin-top: 10px;
+    font-size: 16px;
+  }
+  button {
+    margin-top: 15px;
+    padding: 8px 16px;
+    font-size: 16px;
+    background: #555;
+    color: #eee;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  button:hover {
+    background: #777;
+  }
+  #controls {
+    margin-top: 15px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  select {
+    padding: 6px 10px;
+    font-size: 14px;
+    border-radius: 5px;
+    border: none;
+  }
+</style>
+</head>
+<body>
+
+<h1></h1>
+<div id="board"></div>
+<div id="status"></div>
+<div id="scores"></div>
+
+<div id="controls">
+  <label>黑方： 
+    <select id="blackPlayer">
+      <option value="0">人類</option>
+      <option value="1">隨機AI</option>
+      <option value="2">Minimax AI</option>
+    </select>
+  </label>
+  <label>白方：
+    <select id="whitePlayer">
+      <option value="0">人類</option>
+      <option value="1">隨機AI</option>
+      <option value="2">Minimax AI</option>
+    </select>
+  </label>
+  <button id="restartBtn">重新開始</button>
+</div>
+
+<script>
+(() => {
+  const SIZE = 8;
+  const EMPTY = 0, BLACK = 1, WHITE = 2;
+  let board = [];
+  let currentPlayer = BLACK;
+
+  // 0: 人類, 1: 隨機AI, 2: Minimax AI
+  let playerTypes = {
+    [BLACK]: 0,
+    [WHITE]: 0
+  };
+
+  const boardEl = document.getElementById('board');
+  const statusEl = document.getElementById('status');
+  const scoresEl = document.getElementById('scores');
+  const restartBtn = document.getElementById('restartBtn');
+  const blackPlayerSel = document.getElementById('blackPlayer');
+  const whitePlayerSel = document.getElementById('whitePlayer');
+
+  const directions = [
+    [-1, -1], [-1,0], [-1,1],
+    [0,-1],          [0,1],
+    [1,-1],  [1,0],  [1,1]
+  ];
+
+  function initBoard() {
+    board = Array(SIZE).fill(0).map(() => Array(SIZE).fill(EMPTY));
+    board[3][3] = WHITE;
+    board[4][4] = WHITE;
+    board[3][4] = BLACK;
+    board[4][3] = BLACK;
+  }
+
+  // 是否在盤面內
+  function isOnBoard(r,c) {
+    return r>=0 && r<SIZE && c>=0 && c<SIZE;
+  }
+
+  function opponent(player) {
+    return player === BLACK ? WHITE : BLACK;
+  }
+
+  // 檢查某格對player是否合法（能翻子）
+  function canFlip(r,c,player) {
+    if(board[r][c] !== EMPTY) return false;
+    for(let [dr, dc] of directions) {
+      let rr = r + dr;
+      let cc = c + dc;
+      let foundOpponent = false;
+      while(isOnBoard(rr,cc) && board[rr][cc] === opponent(player)) {
+        rr += dr;
+        cc += dc;
+        foundOpponent = true;
+      }
+      if(foundOpponent && isOnBoard(rr,cc) && board[rr][cc] === player) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function validMoves(player) {
+    let moves = [];
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        if(canFlip(r,c,player)) moves.push([r,c]);
+      }
+    }
+    return moves;
+  }
+
+  // 下子並翻子
+  function makeMove(r,c,player) {
+    board[r][c] = player;
+    for(let [dr, dc] of directions) {
+      let rr = r + dr;
+      let cc = c + dc;
+      let toFlip = [];
+      while(isOnBoard(rr,cc) && board[rr][cc] === opponent(player)) {
+        toFlip.push([rr,cc]);
+        rr += dr;
+        cc += dc;
+      }
+      if(toFlip.length > 0 && isOnBoard(rr,cc) && board[rr][cc] === player) {
+        for(let [fr,fc] of toFlip) board[fr][fc] = player;
+      }
+    }
+  }
+
+  function countDiscs() {
+    let blackCount = 0, whiteCount = 0;
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        if(board[r][c] === BLACK) blackCount++;
+        else if(board[r][c] === WHITE) whiteCount++;
+      }
+    }
+    return [blackCount, whiteCount];
+  }
+
+  function updateScores() {
+    const [bCount, wCount] = countDiscs();
+    scoresEl.textContent = `黑: ${bCount}  白: ${wCount}`;
+  }
+
+  function updateStatus(msg) {
+    if(msg) statusEl.textContent = msg;
+    else statusEl.textContent = `現在輪到 ${currentPlayer === BLACK ? '黑方' : '白方'} 下子`;
+  }
+
+  // 渲染棋盤，並綁定點擊事件（只綁人類回合）
+  function renderBoard() {
+    boardEl.innerHTML = '';
+    const moves = validMoves(currentPlayer);
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        if(board[r][c] !== EMPTY) {
+          const disc = document.createElement('div');
+          disc.className = 'disc ' + (board[r][c] === BLACK ? 'black' : 'white');
+          cell.appendChild(disc);
+          cell.style.cursor = 'default';
+        } else if(playerTypes[currentPlayer] === 0 && moves.some(m => m[0]===r && m[1]===c)) {
+          cell.style.cursor = 'pointer';
+          cell.addEventListener('click', () => {
+            playerMove(r,c);
+          });
+        } else {
+          cell.style.cursor = 'default';
+        }
+        boardEl.appendChild(cell);
+      }
+    }
+    updateScores();
+    updateStatus();
+  }
+
+  // 人類點子
+  async function playerMove(r,c) {
+    if(playerTypes[currentPlayer] !== 0) return;
+    if(!canFlip(r,c,currentPlayer)) return;
+    makeMove(r,c,currentPlayer);
+    await nextTurn();
+  }
+
+  // 延遲工具
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // AI隨機選合法走法
+  function randomMove(player) {
+    const moves = validMoves(player);
+    if(moves.length === 0) return null;
+    return moves[Math.floor(Math.random()*moves.length)];
+  }
+
+  // AI評估函數（簡單棋子差）
+  function evaluateBoard(b, player) {
+    let mine = 0, opp = 0;
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        if(b[r][c] === player) mine++;
+        else if(b[r][c] === opponent(player)) opp++;
+      }
+    }
+    return mine - opp;
+  }
+
+  // 拷貝board
+  function cloneBoard(b) {
+    return b.map(row => row.slice());
+  }
+
+  // canFlip for指定board
+  function canFlipForBoard(b,r,c,player) {
+    if(b[r][c] !== EMPTY) return false;
+    for(let [dr, dc] of directions) {
+      let rr = r+dr, cc = c+dc;
+      let foundOpponent = false;
+      while(isOnBoard(rr,cc) && b[rr][cc] === opponent(player)) {
+        rr += dr;
+        cc += dc;
+        foundOpponent = true;
+      }
+      if(foundOpponent && isOnBoard(rr,cc) && b[rr][cc] === player) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 找合法走法 for指定board
+  function validMovesForBoard(b, player) {
+    let moves = [];
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        if(canFlipForBoard(b,r,c,player)) moves.push([r,c]);
+      }
+    }
+    return moves;
+  }
+
+  // flip discs for指定board，回傳新board
+  function flipDiscsForBoard(b,r,c,player) {
+    let newB = cloneBoard(b);
+    newB[r][c] = player;
+    for(let [dr,dc] of directions) {
+      let rr = r+dr, cc = c+dc;
+      let toFlip = [];
+      while(isOnBoard(rr,cc) && newB[rr][cc] === opponent(player)) {
+        toFlip.push([rr,cc]);
+        rr += dr; cc += dc;
+      }
+      if(toFlip.length > 0 && isOnBoard(rr,cc) && newB[rr][cc] === player) {
+        for(let [fr,fc] of toFlip) newB[fr][fc] = player;
+      }
+    }
+    return newB;
+  }
+
+  // minimax 主函式
+  function minimax(b, player, depth, maximizingPlayer) {
+    if(depth === 0) return evaluateBoard(b, currentPlayer);
+
+    let moves = validMovesForBoard(b, player);
+    if(moves.length === 0) {
+      if(validMovesForBoard(b, opponent(player)).length === 0) {
+        return evaluateBoard(b, currentPlayer);
+      }
+      return minimax(b, opponent(player), depth - 1, !maximizingPlayer);
+    }
+
+    if(maximizingPlayer) {
+      let maxEval = -Infinity;
+      for(let [r,c] of moves) {
+        let newB = flipDiscsForBoard(b,r,c,player);
+        let evalScore = minimax(newB, opponent(player), depth - 1, false);
+        if(evalScore > maxEval) maxEval = evalScore;
+      }
+      return maxEval;
+    } else {
+      let minEval = Infinity;
+      for(let [r,c] of moves) {
+        let newB = flipDiscsForBoard(b,r,c,player);
+        let evalScore = minimax(newB, opponent(player), depth - 1, true);
+        if(evalScore < minEval) minEval = evalScore;
+      }
+      return minEval;
+    }
+  }
+
+  function minimaxRoot(player, depth) {
+    let bestMove = null;
+    let bestVal = -Infinity;
+    let moves = validMovesForBoard(board, player);
+    for(let [r,c] of moves) {
+      let newB = flipDiscsForBoard(board, r, c, player);
+      let val = minimax(newB, opponent(player), depth - 1, false);
+      if(val > bestVal) {
+        bestVal = val;
+        bestMove = [r,c];
+      }
+    }
+    return bestMove;
+  }
+
+  // AI走一步
+  async function aiMove() {
+    await delay(300);
+    let moves = validMoves(currentPlayer);
+    if(moves.length === 0) return false;
+
+    let move = null;
+    if(playerTypes[currentPlayer] === 1) {
+      move = randomMove(currentPlayer);
+    } else if(playerTypes[currentPlayer] === 2) {
+      move = minimaxRoot(currentPlayer, 3);
+    }
+    if(move) {
+      makeMove(move[0], move[1], currentPlayer);
+      renderBoard();
+      return true;
+    }
+    return false;
+  }
+
+  // 換下一回合
+  async function nextTurn() {
+    currentPlayer = opponent(currentPlayer);
+    let moves = validMoves(currentPlayer);
+    if(moves.length === 0) {
+      // 對手也沒得下就結束
+      currentPlayer = opponent(currentPlayer);
+      moves = validMoves(currentPlayer);
+      if(moves.length === 0) {
+        const [bCount, wCount] = countDiscs();
+        if(bCount > wCount) updateStatus(`遊戲結束，黑方勝利！ 黑: ${bCount} 白: ${wCount}`);
+        else if(wCount > bCount) updateStatus(`遊戲結束，白方勝利！ 黑: ${bCount} 白: ${wCount}`);
+        else updateStatus(`遊戲結束，平手！ 黑: ${bCount} 白: ${wCount}`);
+        return;
+      } else {
+        alert(`${currentPlayer === BLACK ? '黑方' : '白方'}無法下子，跳過回合`);
+      }
+    }
+    renderBoard();
+    if(playerTypes[currentPlayer] !== 0) {
+      await aiMove();
+      await nextTurn();
+    }
+  }
+
+  restartBtn.addEventListener('click', async () => {
+    playerTypes[BLACK] = parseInt(blackPlayerSel.value);
+    playerTypes[WHITE] = parseInt(whitePlayerSel.value);
+    initBoard();
+    currentPlayer = BLACK;
+    renderBoard();
+
+    if(playerTypes[currentPlayer] !== 0) {
+      await aiMove();
+      await nextTurn();
+    }
+  });
+
+  // 初始化
+  playerTypes[BLACK] = parseInt(blackPlayerSel.value);
+  playerTypes[WHITE] = parseInt(whitePlayerSel.value);
+  initBoard();
+  renderBoard();
+
+  // 如果起始就是AI，立刻下子
+  (async () => {
+    if(playerTypes[currentPlayer] !== 0) {
+      await aiMove();
+      await nextTurn();
+    }
+  })();
+
+})();
+</script>
+
+</body>
+</html>

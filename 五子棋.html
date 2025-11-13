@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>五子棋 AI 先後手選擇版</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      text-align: center;
+      margin: 20px;
+      background: #f0f0f0;
+      user-select: none;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #game {
+      display: grid;
+      grid-template-columns: repeat(15, 40px);
+      gap: 1px;
+      margin: 20px auto;
+      width: fit-content;
+    }
+    .cell {
+      width: 40px;
+      height: 40px;
+      background-color: #fff8dc;
+      border: 1px solid #aaa;
+      cursor: pointer;
+      position: relative;
+    }
+    .black, .white {
+      border-radius: 50%;
+      position: absolute;
+      top: 5px; left: 5px; right: 5px; bottom: 5px;
+    }
+    .black {
+      background-color: black;
+    }
+    .white {
+      background-color: white;
+      border: 2px solid #333;
+    }
+    #status {
+      font-size: 1.2em;
+      margin-top: 10px;
+      min-height: 1.5em;
+    }
+    button, select {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 1em;
+      cursor: pointer;
+      user-select: none;
+    }
+    #modeSelect, #firstSelect {
+      margin-left: 10px;
+      font-size: 1em;
+      padding: 8px 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1></h1>
+
+  <label for="modeSelect">遊戲模式：</label>
+  <select id="modeSelect">
+    <option value="pvp">雙人對戰</option>
+    <option value="randomAI">隨機 AI</option>
+    <option value="perfectAI">完美 AI（含失誤）</option>
+  </select>
+
+  <label for="firstSelect">玩家先後手：</label>
+  <select id="firstSelect">
+    <option value="black">玩家先手（黑子）</option>
+    <option value="white">玩家後手（白子）</option>
+  </select>
+  <br/>
+
+  <div id="game"></div>
+  <div id="status">目前輪到：黑子</div>
+  <button onclick="resetGame()">重新開始</button>
+
+  <script>
+    const boardSize = 15;
+    const game = document.getElementById("game");
+    const status = document.getElementById("status");
+    const modeSelect = document.getElementById("modeSelect");
+    const firstSelect = document.getElementById("firstSelect");
+
+    // 盤面數字: 0=空 1=黑 2=白
+    let board = [];
+    let currentPlayer = 1; // 黑子先手
+    let gameOver = false;
+    let aiThinking = false;
+
+    // 先後手和AI玩家設定
+    let humanPlayerNum = 1; // 預設玩家黑子
+    let aiPlayerNum = 0;    // 0代表沒AI
+
+    function createBoard() {
+      board = [];
+      game.innerHTML = '';
+      for (let y = 0; y < boardSize; y++) {
+        board[y] = [];
+        for (let x = 0; x < boardSize; x++) {
+          board[y][x] = 0;
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          cell.addEventListener("click", handleClick);
+          game.appendChild(cell);
+        }
+      }
+    }
+
+    function handleClick(e) {
+      if (gameOver || aiThinking) return;
+      const x = +e.target.dataset.x;
+      const y = +e.target.dataset.y;
+      if (board[y][x] !== 0) return;
+
+      if (currentPlayer === humanPlayerNum) {
+        placePiece(x, y, currentPlayer === 1 ? "black" : "white");
+      }
+    }
+
+    function placePiece(x, y, playerColor) {
+      if (gameOver) return;
+      const playerNum = playerColor === "black" ? 1 : 2;
+      if (board[y][x] !== 0) return;
+
+      board[y][x] = playerNum;
+      const cell = getCell(x, y);
+      cell.innerHTML = '';
+      const piece = document.createElement("div");
+      piece.classList.add(playerColor);
+      cell.appendChild(piece);
+
+      if (checkWin(x, y, playerNum)) {
+        status.textContent = (playerColor === "black" ? "黑子" : "白子") + " 勝利！";
+        gameOver = true;
+        return;
+      }
+
+      if (board.flat().every(v => v !== 0)) {
+        status.textContent = "平手！";
+        gameOver = true;
+        return;
+      }
+
+      currentPlayer = currentPlayer === 1 ? 2 : 1;
+      status.textContent = "目前輪到：" + (currentPlayer === 1 ? "黑子" : "白子");
+
+      if (!gameOver && currentPlayer === aiPlayerNum) {
+        aiTurn();
+      }
+    }
+
+    function getCell(x, y) {
+      return game.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+    }
+
+    function checkWin(x, y, playerNum) {
+      const directions = [
+        [1, 0], [0, 1],
+        [1, 1], [1, -1]
+      ];
+      for (let [dx, dy] of directions) {
+        let count = 1;
+        for (let dir of [-1, 1]) {
+          let nx = x + dx * dir;
+          let ny = y + dy * dir;
+          while (
+            nx >= 0 && ny >= 0 && nx < boardSize && ny < boardSize &&
+            board[ny][nx] === playerNum
+          ) {
+            count++;
+            nx += dx * dir;
+            ny += dy * dir;
+          }
+        }
+        if (count >= 5) return true;
+      }
+      return false;
+    }
+
+    async function aiTurn() {
+      if (gameOver) return;
+      if (currentPlayer !== aiPlayerNum) return;
+
+      aiThinking = true;
+      status.textContent = "AI 思考中...";
+      await sleep(300);
+
+      if (modeSelect.value === "randomAI") {
+        const moves = [];
+        for (let y = 0; y < boardSize; y++) {
+          for (let x = 0; x < boardSize; x++) {
+            if (board[y][x] === 0) moves.push({ x, y });
+          }
+        }
+        if (moves.length === 0) {
+          status.textContent = "平手！";
+          gameOver = true;
+          aiThinking = false;
+          return;
+        }
+        const move = moves[Math.floor(Math.random() * moves.length)];
+        placePiece(move.x, move.y, currentPlayer === 1 ? "black" : "white");
+        aiThinking = false;
+        return;
+      }
+
+      if (modeSelect.value === "perfectAI") {
+        const bestMove = await perfectAIMove();
+        if (!bestMove) {
+          status.textContent = "平手！";
+          gameOver = true;
+          aiThinking = false;
+          return;
+        }
+
+        const mistakeChance = 0.2;
+        if (Math.random() < mistakeChance) {
+          const nearbyMoves = getNearbyEmpty(bestMove.x, bestMove.y, 2);
+          if (nearbyMoves.length > 0) {
+            const badMove = nearbyMoves[Math.floor(Math.random() * nearbyMoves.length)];
+            placePiece(badMove.x, badMove.y, currentPlayer === 1 ? "black" : "white");
+            aiThinking = false;
+            return;
+          }
+        }
+
+        placePiece(bestMove.x, bestMove.y, currentPlayer === 1 ? "black" : "white");
+        aiThinking = false;
+      }
+    }
+
+    function getNearbyEmpty(x, y, distance) {
+      const moves = [];
+      for (let dy = -distance; dy <= distance; dy++) {
+        for (let dx = -distance; dx <= distance; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (
+            nx >= 0 && ny >= 0 && nx < boardSize && ny < boardSize &&
+            board[ny][nx] === 0
+          ) {
+            moves.push({ x: nx, y: ny });
+          }
+        }
+      }
+      return moves;
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function perfectAIMove() {
+      const maxDepth = 3;
+      const aiPlayer = aiPlayerNum;
+      const humanPlayer = humanPlayerNum;
+
+      // 修正點：空棋盤時 AI 先手直接下中間
+      if (board.flat().every(v => v === 0)) {
+        return { x: 7, y: 7 };
+      }
+
+      function evaluateBoard(bd) {
+        function countLines(player) {
+          let score = 0;
+          const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+          for (let y = 0; y < boardSize; y++) {
+            for (let x = 0; x < boardSize; x++) {
+              if (bd[y][x] !== player) continue;
+              for (const [dx, dy] of directions) {
+                let count = 1;
+                let nx = x + dx;
+                let ny = y + dy;
+                while (nx >= 0 && ny >= 0 && nx < boardSize && ny < boardSize && bd[ny][nx] === player) {
+                  count++;
+                  nx += dx;
+                  ny += dy;
+                }
+                if (count >= 5) return 100000;
+                score += count ** 3;
+              }
+            }
+          }
+          return score;
+        }
+
+        const aiScore = countLines(aiPlayer);
+        if (aiScore >= 100000) return 100000;
+        const humanScore = countLines(humanPlayer);
+        if (humanScore >= 100000) return -100000;
+        return aiScore - humanScore;
+      }
+
+      function cloneBoard(bd) {
+        return bd.map(row => row.slice());
+      }
+
+      function minimax(bd, depth, alpha, beta, maximizing) {
+        if (depth === 0 || gameOver) {
+          return [evaluateBoard(bd), null];
+        }
+        const player = maximizing ? aiPlayer : humanPlayer;
+        const moves = [];
+
+        for (let y = 0; y < boardSize; y++) {
+          for (let x = 0; x < boardSize; x++) {
+            if (bd[y][x] !== 0) continue;
+            if (!hasNeighbor(bd, x, y, 3)) continue;
+            moves.push({ x, y });
+          }
+        }
+        if (moves.length === 0) return [evaluateBoard(bd), null];
+
+        let bestMove = null;
+
+        if (maximizing) {
+          let maxEval = -Infinity;
+          for (const move of moves) {
+            const newBd = cloneBoard(bd);
+            newBd[move.y][move.x] = player;
+            if (checkWinBoard(newBd, move.x, move.y, player)) return [100000, move];
+            const [evalScore] = minimax(newBd, depth - 1, alpha, beta, false);
+            if (evalScore > maxEval) {
+              maxEval = evalScore;
+              bestMove = move;
+            }
+            alpha = Math.max(alpha, evalScore);
+            if (beta <= alpha) break;
+          }
+          return [maxEval, bestMove];
+        } else {
+          let minEval = Infinity;
+          for (const move of moves) {
+            const newBd = cloneBoard(bd);
+            newBd[move.y][move.x] = player;
+            if (checkWinBoard(newBd, move.x, move.y, player)) return [-100000, move];
+            const [evalScore] = minimax(newBd, depth - 1, alpha, beta, true);
+            if (evalScore < minEval) {
+              minEval = evalScore;
+              bestMove = move;
+            }
+            beta = Math.min(beta, evalScore);
+            if (beta <= alpha) break;
+          }
+          return [minEval, bestMove];
+        }
+      }
+
+      function hasNeighbor(bd, x, y, dist) {
+        for (let dy = -dist; dy <= dist; dy++) {
+          for (let dx = -dist; dx <= dist; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < boardSize && ny < boardSize) {
+              if (bd[ny][nx] !== 0) return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      function checkWinBoard(bd, x, y, player) {
+        const directions = [
+          [1, 0], [0, 1],
+          [1, 1], [1, -1]
+        ];
+        for (let [dx, dy] of directions) {
+          let count = 1;
+          for (let dir of [-1, 1]) {
+            let nx = x + dx * dir;
+            let ny = y + dy * dir;
+            while (
+              nx >= 0 && ny >= 0 && nx < boardSize && ny < boardSize &&
+              bd[ny][nx] === player
+            ) {
+              count++;
+              nx += dx * dir;
+              ny += dy * dir;
+            }
+          }
+          if (count >= 5) return true;
+        }
+        return false;
+      }
+
+      const [score, move] = minimax(board, maxDepth, -Infinity, Infinity, true);
+      return move;
+    }
+
+    function setupPlayers() {
+      const mode = modeSelect.value;
+      const first = firstSelect.value;
+      if (mode === "pvp") {
+        humanPlayerNum = 1; // 玩家黑子
+        aiPlayerNum = 0;
+      } else {
+        if (first === "black") {
+          humanPlayerNum = 1;
+          aiPlayerNum = 2;
+        } else {
+          humanPlayerNum = 2;
+          aiPlayerNum = 1;
+        }
+      }
+    }
+
+    function resetGame() {
+      gameOver = false;
+      aiThinking = false;
+      setupPlayers();
+
+      currentPlayer = 1; // 黑子固定先手
+
+      createBoard();
+
+      // 若AI先手，AI直接下
+      if (currentPlayer === aiPlayerNum && aiPlayerNum !== 0) {
+        aiTurn();
+      } else {
+        status.textContent = "目前輪到：" + (currentPlayer === 1 ? "黑子" : "白子");
+      }
+    }
+
+    modeSelect.addEventListener("change", resetGame);
+    firstSelect.addEventListener("change", resetGame);
+
+    resetGame();
+  </script>
+</body>
+</html>

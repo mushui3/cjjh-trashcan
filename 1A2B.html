@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>1A2B 數字猜謎（2-6位數版）</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #121212;
+    color: #eee;
+    margin: 0; padding: 0;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh;
+  }
+  h1 {
+    margin: 20px 0 5px;
+    color: #39ff14;
+    text-shadow: 0 0 8px #39ff14;
+  }
+  .container {
+    background: #222;
+    padding: 20px 30px;
+    border-radius: 12px;
+    width: 320px;
+    box-shadow: 0 0 15px #39ff14aa;
+  }
+  label {
+    display: block;
+    margin-top: 15px;
+    font-weight: bold;
+  }
+  select, input[type=number], button, input[type=text] {
+    width: 100%;
+    padding: 8px 10px;
+    margin-top: 6px;
+    border-radius: 6px;
+    border: none;
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+  button {
+    background: #39ff14;
+    color: #121212;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 20px;
+    transition: background-color 0.3s ease;
+  }
+  button:hover:not(:disabled) {
+    background: #2ecf0f;
+  }
+  button:disabled {
+    background: #666;
+    cursor: not-allowed;
+  }
+  .hidden {
+    display: none;
+  }
+  #desc {
+    margin-top: 15px;
+    font-size: 0.9rem;
+    color: #aaa;
+    text-align: center;
+  }
+  #timer {
+    margin-top: 15px;
+    font-size: 1.1rem;
+    text-align: center;
+    font-weight: 700;
+    color: #39ff14;
+    text-shadow: 0 0 6px #39ff14aa;
+  }
+  #result {
+    margin-top: 15px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #ff4444;
+    text-align: center;
+    min-height: 1.5em;
+  }
+  ul.history {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0 0;
+    max-height: 130px;
+    overflow-y: auto;
+    border: 1px solid #39ff14;
+    border-radius: 6px;
+    background: #111;
+  }
+  ul.history li {
+    padding: 5px 8px;
+    border-bottom: 1px solid #39ff14aa;
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+  ul.history li:last-child {
+    border-bottom: none;
+  }
+  .versus-panel {
+    margin-top: 15px;
+    border-top: 1px solid #39ff14;
+    padding-top: 15px;
+  }
+  #ai-status {
+    margin-top: 8px;
+    font-style: italic;
+    color: #eee;
+    min-height: 1.2em;
+  }
+  .flex-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+  }
+  .flex-row > * {
+    flex: 1;
+  }
+  .footer {
+    margin: 20px 0;
+    font-size: 0.8rem;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+
+<h1></h1>
+
+<div class="container" id="setupPanel">
+  <label for="digitSelect">選擇位數 (2-6位):</label>
+  <select id="digitSelect">
+    <option value="2">2 位數</option>
+    <option value="3" selected>3 位數</option>
+    <option value="4">4 位數</option>
+    <option value="5">5 位數</option>
+    <option value="6">6 位數</option>
+  </select>
+
+  <label for="modeSelect">選擇模式:</label>
+  <select id="modeSelect">
+    <option value="player" selected>單人模式（你猜）</option>
+    <option value="versus">AI 對戰模式</option>
+  </select>
+
+  <label for="difficultySelect">AI 難度（對戰模式才有效）:</label>
+  <select id="difficultySelect" disabled>
+    <option value="easy">簡單</option>
+    <option value="medium" selected>中等</option>
+    <option value="hard">困難</option>
+  </select>
+
+  <button id="btnStart">開始遊戲</button>
+</div>
+
+<div class="container hidden" id="gamePanel">
+  <div id="desc"></div>
+
+  <div class="flex-row">
+    <input type="text" id="guessInput" maxlength="6" placeholder="輸入你的猜測" autocomplete="off" />
+    <button id="btnGuess">猜！</button>
+  </div>
+
+  <div id="timer">計時：00:00</div>
+
+  <ul class="history" id="historyList" title="玩家猜測歷史"></ul>
+
+  <div class="versus-panel hidden" id="versusPanel">
+    <div><strong>AI 猜測歷史</strong></div>
+    <ul class="history" id="aiHistoryList" title="AI 猜測歷史"></ul>
+    <div id="ai-status"></div>
+  </div>
+
+  <div id="result"></div>
+  <button id="btnRestart" class="hidden">重新開始</button>
+</div>
+
+<div class="footer">提示：猜對所有數字與位置，即為4A0B (或對應位數的完全正確)</div>
+
+<script>
+(() => {
+  const digitSelect = document.getElementById('digitSelect');
+  const modeSelect = document.getElementById('modeSelect');
+  const difficultySelect = document.getElementById('difficultySelect');
+  const btnStart = document.getElementById('btnStart');
+  const setupPanel = document.getElementById('setupPanel');
+  const gamePanel = document.getElementById('gamePanel');
+  const desc = document.getElementById('desc');
+  const guessInput = document.getElementById('guessInput');
+  const btnGuess = document.getElementById('btnGuess');
+  const timerEl = document.getElementById('timer');
+  const historyList = document.getElementById('historyList');
+  const resultEl = document.getElementById('result');
+  const versusPanel = document.getElementById('versusPanel');
+  const aiHistoryList = document.getElementById('aiHistoryList');
+  const aiStatus = document.getElementById('ai-status');
+  const btnRestart = document.getElementById('btnRestart');
+
+  let answer = '';
+  let digit = 3;
+  let mode = 'player';
+  let aiDifficulty = 'medium';
+  let gameOver = false;
+  let startTime = null;
+  let timerInterval = null;
+  let playerTurn = true;
+
+  // AI State & variables
+  let aiCurrentGuess = null;
+  let aiLastResult = null;
+  let aiAutoTimer = null;
+  let aiStrategy = null;
+
+  // ----------- 工具函數 -------------
+
+  // 產生不重複的數字字串 (digit位)
+  function generateAnswer() {
+    const digits = [];
+    while (digits.length < digit) {
+      let n = Math.floor(Math.random() * 10).toString();
+      if (!digits.includes(n)) digits.push(n);
+    }
+    return digits.join('');
+  }
+
+  // 檢查輸入是否合法：長度digit，且數字且不重複
+  function isValidGuess(str) {
+    if (str.length !== digit) return false;
+    if (!/^\d+$/.test(str)) return false;
+    const chars = [...str];
+    return new Set(chars).size === digit;
+  }
+
+  // 計算AB (A是完全正確，B是數字正確但位置錯誤)
+  function getAB(guess, ans) {
+    let A = 0, B = 0;
+    for (let i = 0; i < digit; i++) {
+      if (guess[i] === ans[i]) {
+        A++;
+      } else if (ans.includes(guess[i])) {
+        B++;
+      }
+    }
+    return { A, B };
+  }
+
+  // 時間格式 mm:ss
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  }
+
+  // 加入歷史紀錄
+  function addHistory(guess, result, listEl) {
+    const li = document.createElement('li');
+    li.textContent = `${guess} → ${result.A}A${result.B}B`;
+    listEl.prepend(li);
+  }
+
+  // 清空歷史
+  function clearHistory() {
+    historyList.innerHTML = '';
+    aiHistoryList.innerHTML = '';
+  }
+
+  // 計時器更新
+  function updateTimer() {
+    if (!startTime || gameOver) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    timerEl.textContent = `計時：${formatTime(elapsed)}`;
+  }
+
+  // 遊戲結束處理
+  function endGame(msg) {
+    gameOver = true;
+    clearInterval(timerInterval);
+    clearTimeout(aiAutoTimer);
+    resultEl.textContent = msg;
+    guessInput.disabled = true;
+    btnGuess.disabled = true;
+    aiStatus.textContent = '';
+    btnRestart.classList.remove('hidden');
+  }
+
+  // 重置遊戲面板狀態
+  function resetGamePanel() {
+    startTime = null;
+    clearInterval(timerInterval);
+    clearTimeout(aiAutoTimer);
+    timerEl.textContent = '計時：00:00';
+    clearHistory();
+    resultEl.textContent = '';
+    guessInput.value = '';
+    guessInput.disabled = false;
+    btnGuess.disabled = false;
+    gameOver = false;
+    playerTurn = true;
+    aiCurrentGuess = null;
+    aiLastResult = null;
+    aiStatus.textContent = '';
+  }
+
+  // -------- AI 策略物件 --------------
+
+  // 基本AI策略，會過濾可行解空間並猜下一個
+  class BasicAI {
+    constructor() {
+      this.possible = [];
+    }
+    reset() {
+      this.possible = generateAllCandidates();
+    }
+    getNextGuess() {
+      if (this.possible.length === 0) return null;
+      // 簡單取第一個候選
+      return this.possible[0];
+    }
+    updatePool(guess, result) {
+      this.possible = this.possible.filter(item => {
+        const r = getAB(item, guess);
+        return r.A === result.A && r.B === result.B;
+      });
+    }
+    // 高難度需要的方法佔位
+    syncPlayerGuess() {}
+  }
+
+  // 中等AI：隨機從候選解空間猜
+  class MediumAI extends BasicAI {
+    getNextGuess() {
+      if (this.possible.length === 0) return null;
+      const idx = Math.floor(Math.random() * this.possible.length);
+      return this.possible[idx];
+    }
+  }
+
+  // 困難AI：會提前猜（3~5秒），會同步參考玩家猜測結果，並且自己會更新
+  class HardAI extends BasicAI {
+    constructor() {
+      super();
+      this.playerGuessHistory = [];
+    }
+    reset() {
+      super.reset();
+      this.playerGuessHistory = [];
+    }
+    getNextGuess() {
+      if (this.possible.length === 0) return null;
+      // 簡單挑中間
+      return this.possible[Math.floor(this.possible.length / 2)];
+    }
+    updatePool(guess, result) {
+      super.updatePool(guess, result);
+    }
+    syncPlayerGuess(playerGuess, playerResult) {
+      this.playerGuessHistory.push({guess: playerGuess, result: playerResult});
+      // 過濾自己候選解空間同時參考玩家猜測過濾
+      this.possible = this.possible.filter(candidate => {
+        // 每個玩家猜測結果都必須在 candidate 上匹配
+        return this.playerGuessHistory.every(({guess, result}) => {
+          const r = getAB(candidate, guess);
+          return r.A === result.A && r.B === result.B;
+        });
+      });
+    }
+  }
+
+  // 產生所有可能解 (digit位數，不重複數字)
+  function generateAllCandidates() {
+    const results = [];
+    function dfs(path) {
+      if (path.length === digit) {
+        results.push(path.join(''));
+        return;
+      }
+      for(let i=0;i<=9;i++) {
+        const s = i.toString();
+        if (!path.includes(s)) {
+          path.push(s);
+          dfs(path);
+          path.pop();
+        }
+      }
+    }
+    dfs([]);
+    return results;
+  }
+
+  // ------------ 主流程 -------------
+
+  function startGame() {
+    digit = parseInt(digitSelect.value);
+    mode = modeSelect.value;
+    aiDifficulty = difficultySelect.value;
+
+    answer = generateAnswer();
+
+    resetGamePanel();
+
+    if (mode === 'player') {
+      desc.textContent = `請輸入 ${digit} 位不重複的數字進行猜測`;
+      versusPanel.classList.add('hidden');
+    } else {
+      desc.textContent = `玩家與 AI 輪流猜數字，難度越高AI越會提前出招！`;
+      versusPanel.classList.remove('hidden');
+
+      switch(aiDifficulty) {
+        case 'easy':
+          aiStrategy = new BasicAI();
+          break;
+        case 'medium':
+          aiStrategy = new MediumAI();
+          break;
+        case 'hard':
+          aiStrategy = new HardAI();
+          break;
+        default:
+          aiStrategy = new MediumAI();
+      }
+      aiStrategy.reset();
+    }
+
+    setupPanel.classList.add('hidden');
+    gamePanel.classList.remove('hidden');
+
+    guessInput.maxLength = digit;
+    guessInput.placeholder = `輸入你的猜測 (${digit}位不重複數字)`;
+
+    // 如果AI模式且難度高，AI先猜的可能性可擴展後面
+  }
+
+  function handlePlayerGuess() {
+    if (gameOver) return;
+    const guess = guessInput.value.trim();
+    if (!isValidGuess(guess)) {
+      alert(`請輸入${digit}位不重複的數字！`);
+      return;
+    }
+
+    if (!startTime) {
+      startTime = Date.now();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    const result = getAB(guess, answer);
+    addHistory(guess, result, historyList);
+
+    if (mode === 'versus' && aiDifficulty === 'hard') {
+      aiStrategy.syncPlayerGuess(guess, result);
+    }
+
+    if (result.A === digit) {
+      endGame('玩家贏了！🎉');
+      return;
+    }
+
+    guessInput.value = '';
+
+    if (mode === 'player') {
+      return; // 玩家繼續猜
+    }
+
+    // AI 模式：處理AI猜測
+    playerTurn = false;
+    guessInput.disabled = true;
+    btnGuess.disabled = true;
+    aiStatus.textContent = 'AI 猜測中...';
+
+    if (aiDifficulty === 'hard') {
+      if (!aiAutoTimer) scheduleAiAutoGuess();
+      aiStatus.textContent = 'AI 會提前在3~5秒內自動猜！';
+      return;
+    }
+
+    setTimeout(() => aiGuess(), 600);
+  }
+
+  function aiGuess() {
+    if (gameOver) return;
+    if (!aiCurrentGuess) {
+      aiCurrentGuess = aiStrategy.getNextGuess();
+      if (!aiCurrentGuess) {
+        endGame('AI 無法猜出答案，玩家勝利！');
+        return;
+      }
+    }
+
+    if (!startTime) {
+      startTime = Date.now();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    const result = getAB(aiCurrentGuess, answer);
+    addHistory(aiCurrentGuess, result, aiHistoryList);
+
+    if (result.A === digit) {
+      endGame('AI 贏了！🤖');
+      return;
+    }
+
+    aiStrategy.updatePool(aiCurrentGuess, result);
+    aiCurrentGuess = aiStrategy.getNextGuess();
+
+    if (!aiCurrentGuess) {
+      endGame('AI 無法猜出答案，玩家勝利！');
+      return;
+    }
+
+    playerTurn = true;
+    aiStatus.textContent = '輪到玩家猜了！';
+    guessInput.disabled = false;
+    btnGuess.disabled = false;
+  }
+
+  // 最高難度AI自動提前猜
+  function scheduleAiAutoGuess() {
+    if (gameOver) return;
+    const delay = 3000 + Math.random() * 2000; // 3~5秒
+
+    aiAutoTimer = setTimeout(() => {
+      if (gameOver) return;
+
+      aiCurrentGuess = aiStrategy.getNextGuess();
+      if (!aiCurrentGuess) {
+        endGame('AI 無法猜出答案，玩家勝利！');
+        return;
+      }
+
+      if (!startTime) {
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 1000);
+      }
+
+      const result = getAB(aiCurrentGuess, answer);
+      addHistory(aiCurrentGuess, result, aiHistoryList);
+
+      if (result.A === digit) {
+        endGame('AI 贏了！🤖');
+        return;
+      }
+
+      aiStrategy.updatePool(aiCurrentGuess, result);
+
+      // 繼續預排下一次猜測
+      scheduleAiAutoGuess();
+
+      // AI猜完，輪到玩家
+      playerTurn = true;
+      aiStatus.textContent = '輪到玩家猜了！';
+      guessInput.disabled = false;
+      btnGuess.disabled = false;
+
+    }, delay);
+  }
+
+  btnStart.addEventListener('click', startGame);
+  btnGuess.addEventListener('click', handlePlayerGuess);
+  guessInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') btnGuess.click();
+  });
+
+  btnRestart.addEventListener('click', () => {
+    setupPanel.classList.remove('hidden');
+    gamePanel.classList.add('hidden');
+  });
+
+  modeSelect.addEventListener('change', () => {
+    difficultySelect.disabled = modeSelect.value !== 'versus';
+  });
+})();
+</script>
+
+</body>
+</html>

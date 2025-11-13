@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>井字炸彈 霓虹版 單人/雙人模式</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron&display=swap');
+  body {
+    background: #000015;
+    color: #eee;
+    font-family: 'Orbitron', sans-serif;
+    text-shadow: 0 0 10px #00fff7;
+    display: flex; flex-direction: column; align-items: center; padding: 20px;
+    min-height: 100vh;
+    margin: 0;
+  }
+  #mode-select {
+    margin-bottom: 15px;
+    font-size: 18px;
+    color: #00e0ff;
+    background: #001a33;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    box-shadow: 0 0 15px #00e0ff;
+  }
+  #depth-select {
+    margin-left: 10px;
+    font-size: 16px;
+    color: #00e0ff;
+    background: #001a33;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    box-shadow: 0 0 12px #00e0ff;
+  }
+  #info {
+    font-size: 22px;
+    color: #00fff7;
+    text-shadow: 0 0 12px #00fff7;
+    user-select: none;
+    margin-bottom: 10px;
+  }
+  #turn {
+    text-shadow: 0 0 15px currentColor;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 120px);
+    grid-template-rows: repeat(3, 120px);
+    gap: 8px;
+    background: #0a0a23;
+    box-shadow:
+      0 0 15px #00f0ff,
+      inset 0 0 10px #00f0ff;
+    padding: 20px;
+    border-radius: 12px;
+  }
+  .cell {
+    background: #05052a;
+    box-shadow:
+      0 0 10px #00fff7,
+      inset 0 0 8px #00aaff;
+    border-radius: 8px;
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.3s ease;
+  }
+  .cell:hover {
+    box-shadow:
+      0 0 20px #00ffff,
+      inset 0 0 15px #00ccff;
+  }
+  .piece {
+    position: absolute;
+    border-radius: 50%;
+    border: 3px solid;
+    transition: transform 0.3s ease;
+    pointer-events: none;
+  }
+  .layer1 {
+    width: 80px;
+    height: 80px;
+    top: 20px;
+    left: 20px;
+  }
+  .layer2 {
+    width: 60px;
+    height: 60px;
+    top: 30px;
+    left: 30px;
+  }
+  .layer3 {
+    width: 40px;
+    height: 40px;
+    top: 40px;
+    left: 40px;
+  }
+  .red {
+    color: #ff007f;
+    background: #ff007f;
+    border-color: #b30059;
+    filter: none;
+    box-shadow: none;
+  }
+  .blue {
+    color: #00e0ff;
+    background: #00e0ff;
+    border-color: #006f8c;
+    filter: none;
+    box-shadow: none;
+  }
+
+  @keyframes flash {
+    0%, 100% { background-color: rgba(255,255,255,0.8); }
+    50% { background-color: transparent; }
+  }
+
+  .cell.flash {
+    animation: flash 0.4s ease-in-out;
+    box-shadow:
+      0 0 20px #fff,
+      inset 0 0 20px #fff !important;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translate(0,0); }
+    20%, 60% { transform: translate(-5px,0); }
+    40%, 80% { transform: translate(5px,0); }
+  }
+
+  #board.shake {
+    animation: shake 0.4s ease-in-out;
+  }
+
+  #reset {
+    background: #001a33;
+    border: none;
+    color: #00e0ff;
+    padding: 8px 16px;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 0 15px #00e0ff;
+    margin-top: 10px;
+    transition: background 0.3s ease;
+  }
+  #reset:hover {
+    background: #005577;
+  }
+</style>
+</head>
+<body>
+
+<select id="mode-select" title="選擇遊戲模式">
+  <option value="pvp">雙人模式</option>
+  <option value="pve">單人模式 (對電腦)</option>
+</select>
+<label for="depth-select" style="color:#00e0ff;">難度：</label>
+<select id="depth-select" title="AI 搜尋深度" disabled>
+  <option value="1">1層</option>
+  <option value="2" selected>2層</option>
+  <option value="3">3層</option>
+  <option value="4">4層</option>
+  <option value="5">5層</option>
+</select>
+
+<div id="info">輪到 <span id="turn" style="color:#ff007f;">紅色</span></div>
+<div id="board"></div>
+<button id="reset">重新開始</button>
+
+<script>
+  const board = document.getElementById('board');
+  const turnSpan = document.getElementById('turn');
+  const resetBtn = document.getElementById('reset');
+  const modeSelect = document.getElementById('mode-select');
+  const depthSelect = document.getElementById('depth-select');
+
+  let grid = Array(9).fill(0).map(() => []);
+  let currentPlayer = 1; // 1=紅, 2=藍
+  let gameOver = false;
+
+  function initBoard() {
+    board.innerHTML = '';
+    for(let i=0; i<9; i++) {
+      const cell = document.createElement('div');
+      cell.classList.add('cell');
+      cell.dataset.index = i;
+      cell.addEventListener('click', onCellClick);
+      board.appendChild(cell);
+    }
+  }
+  initBoard();
+
+  async function onCellClick(e) {
+    if(gameOver) return;
+
+    const idx = +e.currentTarget.dataset.index;
+    if(grid[idx].length >= 3) return;
+
+    if(modeSelect.value === 'pve' && currentPlayer === 2) return;
+
+    placePiece(idx, currentPlayer);
+
+    if(checkWin(currentPlayer)) {
+      alert((currentPlayer === 1 ? '紅色' : '藍色') + '贏了！');
+      gameOver = true;
+      return;
+    }
+
+    if(isFull()) {
+      alert('平局！');
+      gameOver = true;
+      return;
+    }
+
+    currentPlayer = 3 - currentPlayer;
+    updateTurn();
+
+    if(!gameOver && modeSelect.value === 'pve' && currentPlayer === 2) {
+      await sleep(300);
+      aiMove();
+    }
+  }
+
+  function placePiece(idx, player) {
+    grid[idx].push(player);
+    renderCell(idx);
+
+    if(grid[idx].length === 3) {
+      bombExplosion(idx);
+    }
+  }
+
+  function renderCell(idx) {
+    const cell = board.children[idx];
+    cell.innerHTML = '';
+    grid[idx].forEach((player, i) => {
+      const div = document.createElement('div');
+      div.classList.add('piece');
+      div.classList.add(player === 1 ? 'red' : 'blue');
+      div.classList.add('layer' + (i+1));
+      cell.appendChild(div);
+    });
+  }
+
+  function bombExplosion(centerIdx) {
+    const affected = getNeighbors(centerIdx);
+    affected.push(centerIdx);
+
+    affected.forEach(i => {
+      if(grid[i].length > 0) {
+        const cell = board.children[i];
+        cell.classList.add('flash');
+        setTimeout(() => cell.classList.remove('flash'), 400);
+      }
+    });
+
+    board.classList.add('shake');
+    setTimeout(() => board.classList.remove('shake'), 400);
+
+    // 改：自己格子不被炸，只炸鄰居
+    affected.forEach(i => {
+      if(i === centerIdx) return; // 跳過自己
+      if(grid[i].length > 0) {
+        grid[i].pop();
+        renderCell(i);
+      }
+    });
+  }
+
+  function getNeighbors(idx) {
+    const neighbors = [];
+    const row = Math.floor(idx / 3);
+    const col = idx % 3;
+    for(let r = row-1; r <= row+1; r++) {
+      for(let c = col-1; c <= col+1; c++) {
+        if(r < 0 || r > 2 || c < 0 || c > 2) continue;
+        if(r === row && c === col) continue;
+        neighbors.push(r*3 + c);
+      }
+    }
+    return neighbors;
+  }
+
+  function checkWin(player) {
+    const lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+
+    for(let layer=0; layer<3; layer++) {
+      for(let line of lines) {
+        if(line.every(idx => grid[idx].length > layer && grid[idx][layer] === player)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isFull() {
+    return grid.every(c => c.length >= 3);
+  }
+
+  function updateTurn() {
+    turnSpan.textContent = currentPlayer === 1 ? '紅色' : '藍色';
+    turnSpan.style.color = currentPlayer === 1 ? '#ff007f' : '#00e0ff';
+  }
+
+  resetBtn.addEventListener('click', () => {
+    grid = Array(9).fill(0).map(() => []);
+    currentPlayer = 1;
+    gameOver = false;
+    updateTurn();
+    initBoard();
+  });
+
+  // 簡單等待
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  // 複製棋盤狀態
+  function cloneGrid(state) {
+    return state.map(arr => arr.slice());
+  }
+
+  // Minimax AI
+  function minimax(state, depth, isMaximizing, player) {
+    const opponent = 3 - player;
+
+    if(checkWinState(state, player)) return { score: 10 };
+    if(checkWinState(state, opponent)) return { score: -10 };
+    if(depth === 0 || isFullState(state)) return { score: 0 };
+
+    let bestMove = -1;
+
+    if(isMaximizing) {
+      let bestScore = -Infinity;
+      for(let i=0; i<9; i++) {
+        if(state[i].length < 3) {
+          let newState = cloneGrid(state);
+          newState[i].push(player);
+          if(newState[i].length === 3) {
+            bombExplosionState(newState, i);
+          }
+          const result = minimax(newState, depth -1, false, player);
+          if(result.score > bestScore) {
+            bestScore = result.score;
+            bestMove = i;
+          }
+        }
+      }
+      return { score: bestScore, move: bestMove };
+    } else {
+      let bestScore = Infinity;
+      for(let i=0; i<9; i++) {
+        if(state[i].length < 3) {
+          let newState = cloneGrid(state);
+          newState[i].push(opponent);
+          if(newState[i].length === 3) {
+            bombExplosionState(newState, i);
+          }
+          const result = minimax(newState, depth -1, true, player);
+          if(result.score < bestScore) {
+            bestScore = result.score;
+            bestMove = i;
+          }
+        }
+      }
+      return { score: bestScore, move: bestMove };
+    }
+  }
+
+  // 判斷勝利 (AI用)
+  function checkWinState(state, player) {
+    const lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+    for(let layer=0; layer<3; layer++) {
+      for(let line of lines) {
+        if(line.every(idx => state[idx].length > layer && state[idx][layer] === player)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // 判斷全滿 (AI用)
+  function isFullState(state) {
+    return state.every(c => c.length >=3);
+  }
+
+  // AI用炸彈爆炸狀態 (不渲染)
+  function bombExplosionState(state, centerIdx) {
+    const neighbors = getNeighbors(centerIdx);
+    neighbors.push(centerIdx);
+
+    // 只炸鄰居，不炸自己
+    neighbors.forEach(i => {
+      if(i === centerIdx) return;
+      if(state[i].length > 0) {
+        state[i].pop();
+      }
+    });
+  }
+
+  // AI 下棋
+  async function aiMove() {
+    const depth = +depthSelect.value;
+    const { move } = minimax(grid, depth, true, currentPlayer);
+    if(move !== -1) {
+      placePiece(move, currentPlayer);
+
+      if(checkWin(currentPlayer)) {
+        alert('藍色贏了！');
+        gameOver = true;
+        return;
+      }
+
+      if(isFull()) {
+        alert('平局！');
+        gameOver = true;
+        return;
+      }
+
+      currentPlayer = 3 - currentPlayer;
+      updateTurn();
+    }
+  }
+
+  modeSelect.addEventListener('change', () => {
+    depthSelect.disabled = modeSelect.value !== 'pve';
+    resetBtn.click();
+  });
+
+  updateTurn();
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>英國跳棋 - 進階版</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0; padding: 10px;
+  }
+  h1 { margin-bottom: 5px; }
+  #controls {
+    margin-bottom: 10px;
+  }
+  #board {
+    display: grid;
+    grid-template: repeat(8, 70px) / repeat(8, 70px);
+    border: 2px solid #333;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  }
+  .square {
+    width: 70px;
+    height: 70px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  .dark {
+    background: #3a3a3a;
+  }
+  .light {
+    background: #ddd;
+  }
+  .piece {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    box-shadow: 0 0 4px #222 inset;
+    position: relative;
+    transition: transform 0.2s ease;
+  }
+  .red { background: #d9534f; }
+  .black { background: #222; }
+  .king::after {
+    content: '♔';
+    font-size: 30px;
+    color: gold;
+    position: absolute;
+    top: 7px; left: 50%; transform: translateX(-50%);
+    pointer-events: none;
+    user-select: none;
+  }
+  .selected {
+    outline: 3px solid yellow;
+    outline-offset: 3px;
+  }
+  #message {
+    margin-top: 15px;
+    font-weight: bold;
+  }
+  #modeSelect, #aiSelect {
+    margin-left: 5px;
+    padding: 5px;
+  }
+</style>
+</head>
+<body>
+<h1></h1>
+<div id="controls">
+  模式：
+  <select id="modeSelect">
+    <option value="two">雙人對戰</option>
+    <option value="single">單人對電腦</option>
+  </select>
+  AI：
+  <select id="aiSelect" disabled>
+    <option value="random">隨機AI</option>
+    <option value="minimax">Minimax AI</option>
+  </select>
+  <button id="resetBtn">重新開始</button>
+</div>
+<div id="board"></div>
+<div id="message"></div>
+
+<script>
+(() => {
+  const boardEl = document.getElementById('board');
+  const messageEl = document.getElementById('message');
+  const modeSelect = document.getElementById('modeSelect');
+  const aiSelect = document.getElementById('aiSelect');
+  const resetBtn = document.getElementById('resetBtn');
+
+  // 棋子顏色常數
+  const RED = 'red';
+  const BLACK = 'black';
+
+  // 棋盤資料結構：8x8陣列，值為 null / { color, isKing }
+  let board = [];
+  let turn = RED;
+  let selected = null; // {row, col}
+  let mandatoryJumps = []; // 必須跳的棋子位置（規則：有跳必須跳）
+
+  // 模式與AI設定
+  let mode = 'two'; // two or single
+  let aiType = 'random'; // random or minimax
+  let aiThinking = false;
+
+  // 建立初始棋盤陣列
+  function initBoard() {
+    board = [];
+    for (let r = 0; r < 8; r++) {
+      const row = [];
+      for (let c = 0; c < 8; c++) {
+        if ((r + c) % 2 === 1) {
+          if (r < 3) row.push({ color: BLACK, isKing: false });
+          else if (r > 4) row.push({ color: RED, isKing: false });
+          else row.push(null);
+        } else {
+          row.push(null);
+        }
+      }
+      board.push(row);
+    }
+    turn = RED;
+    selected = null;
+    mandatoryJumps = [];
+    messageEl.textContent = `回合：${turn === RED ? '紅方' : '黑方'}`;
+  }
+
+  // 渲染棋盤與棋子
+  function renderBoard() {
+    boardEl.innerHTML = '';
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const square = document.createElement('div');
+        square.classList.add('square');
+        square.dataset.row = r;
+        square.dataset.col = c;
+        (r + c) % 2 === 1 ? square.classList.add('dark') : square.classList.add('light');
+        const piece = board[r][c];
+        if (piece) {
+          const pieceEl = document.createElement('div');
+          pieceEl.classList.add('piece', piece.color);
+          if (piece.isKing) pieceEl.classList.add('king');
+          if (selected && selected.row === r && selected.col === c) pieceEl.classList.add('selected');
+          square.appendChild(pieceEl);
+        }
+        square.addEventListener('click', () => onSquareClick(r, c));
+        boardEl.appendChild(square);
+      }
+    }
+  }
+
+  // 複製棋盤（淺複製但每個row新陣列）
+  function copyBoard(src) {
+    return src.map(row => row.map(cell => cell ? {...cell} : null));
+  }
+
+  // 方向偏移，紅棋往上，黑棋往下
+  const DIRECTIONS = {
+    [RED]: [[-1, -1], [-1, 1]],
+    [BLACK]: [[1, -1], [1, 1]],
+    king: [[-1,-1], [-1,1], [1,-1], [1,1]],
+  };
+
+  // 判斷位置是否在棋盤內
+  function inBounds(r, c) {
+    return r >= 0 && r < 8 && c >= 0 && c < 8;
+  }
+
+  // 找出所有可吃棋子（必須跳的棋子）
+  function findMandatoryJumps(bd, color) {
+    let jumps = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = bd[r][c];
+        if (piece && piece.color === color) {
+          if (canJumpFrom(bd, r, c)) jumps.push({row: r, col: c});
+        }
+      }
+    }
+    return jumps;
+  }
+
+  // 判斷該棋子是否可跳吃
+  function canJumpFrom(bd, r, c) {
+    const piece = bd[r][c];
+    if (!piece) return false;
+    const moves = piece.isKing ? DIRECTIONS.king : DIRECTIONS[piece.color];
+    for (const [dr, dc] of moves) {
+      const midR = r + dr;
+      const midC = c + dc;
+      const destR = r + dr*2;
+      const destC = c + dc*2;
+      if (inBounds(destR, destC) && bd[destR][destC] === null) {
+        const midPiece = bd[midR][midC];
+        if (midPiece && midPiece.color !== piece.color) return true;
+      }
+    }
+    return false;
+  }
+
+  // 判斷該棋子是否有合法移動(不跳吃)
+  function canMoveFrom(bd, r, c) {
+    const piece = bd[r][c];
+    if (!piece) return false;
+    const moves = piece.isKing ? DIRECTIONS.king : DIRECTIONS[piece.color];
+    for (const [dr, dc] of moves) {
+      const nr = r + dr;
+      const nc = c + dc;
+      if (inBounds(nr, nc) && bd[nr][nc] === null) return true;
+    }
+    return false;
+  }
+
+  // 取得所有合法走步（含跳吃和普通移動）
+  function getLegalMoves(bd, r, c, mustJumpOnly = false) {
+    const piece = bd[r][c];
+    if (!piece) return [];
+    const moves = piece.isKing ? DIRECTIONS.king : DIRECTIONS[piece.color];
+    let legalMoves = [];
+
+    // 先找跳吃
+    for (const [dr, dc] of moves) {
+      const midR = r + dr;
+      const midC = c + dc;
+      const destR = r + dr*2;
+      const destC = c + dc*2;
+      if (inBounds(destR, destC) && bd[destR][destC] === null) {
+        const midPiece = bd[midR][midC];
+        if (midPiece && midPiece.color !== piece.color) {
+          legalMoves.push({from: [r,c], to: [destR, destC], jump: true, jumped: [midR, midC]});
+        }
+      }
+    }
+    // 如果必須跳吃，不考慮普通移動
+    if (mustJumpOnly && legalMoves.length > 0) return legalMoves;
+
+    // 找普通移動
+    if (!mustJumpOnly) {
+      for (const [dr, dc] of moves) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (inBounds(nr, nc) && bd[nr][nc] === null) {
+          legalMoves.push({from: [r,c], to: [nr,nc], jump: false});
+        }
+      }
+    }
+    return legalMoves;
+  }
+
+  // 把棋子升級成王（到最底行的）
+  function maybeKing(bd, r, c) {
+    const piece = bd[r][c];
+    if (!piece) return;
+    if (!piece.isKing) {
+      if (piece.color === RED && r === 0) piece.isKing = true;
+      if (piece.color === BLACK && r === 7) piece.isKing = true;
+    }
+  }
+
+  // 執行移動
+  function makeMove(bd, move) {
+    const [fr, fc] = move.from;
+    const [tr, tc] = move.to;
+    const piece = bd[fr][fc];
+    bd[fr][fc] = null;
+    bd[tr][tc] = piece;
+    if (move.jump) {
+      const [jr, jc] = move.jumped;
+      bd[jr][jc] = null;
+    }
+    maybeKing(bd, tr, tc);
+  }
+
+  // 判斷是否有連跳可繼續
+  function canContinueJump(bd, r, c) {
+    const piece = bd[r][c];
+    if (!piece) return false;
+    return getLegalMoves(bd, r, c, true).some(m => m.jump);
+  }
+
+  // 判斷遊戲是否結束
+  function checkGameOver(bd, color) {
+    // 沒棋子 or 沒合法移動就輸
+    let hasPiece = false;
+    let hasMove = false;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = bd[r][c];
+        if (p && p.color === color) {
+          hasPiece = true;
+          if (getLegalMoves(bd, r, c).length > 0) hasMove = true;
+        }
+      }
+    }
+    if (!hasPiece || !hasMove) return true;
+    return false;
+  }
+
+  // 換手
+  function switchTurn() {
+    turn = (turn === RED) ? BLACK : RED;
+    messageEl.textContent = `回合：${turn === RED ? '紅方' : '黑方'}`;
+    mandatoryJumps = findMandatoryJumps(board, turn);
+  }
+
+function onSquareClick(r, c) {
+  if (aiThinking) return; // AI思考時不理人類操作
+
+  const piece = board[r][c];
+
+  if (piece && piece.color === turn) {
+    // 點到自己棋子，不管之前選了沒，都直接切換選擇（只要符合強制跳吃規則）
+    if (mandatoryJumps.length === 0 || mandatoryJumps.some(mj => mj.row === r && mj.col === c)) {
+      selected = { row: r, col: c };
+      renderBoard();
+      return;
+    } else {
+      // 強制跳吃時點非跳棋子，忽略
+      return;
+    }
+  }
+
+  // 如果點的是空格或敵方棋子，且已有選擇，嘗試移動
+  if (selected) {
+    const moves = getLegalMoves(board, selected.row, selected.col, mandatoryJumps.length > 0);
+    const move = moves.find(m => m.to[0] === r && m.to[1] === c);
+    if (move) {
+      makeMove(board, move);
+      if (move.jump && canContinueJump(board, r, c)) {
+        selected = { row: r, col: c };
+        renderBoard();
+        return; // 連跳
+      } else {
+        selected = null;
+        if (checkGameOver(board, (turn === RED) ? BLACK : RED)) {
+          messageEl.textContent = `遊戲結束，${turn === RED ? '紅方' : '黑方'}贏！`;
+          renderBoard();
+          return;
+        }
+        switchTurn();
+        renderBoard();
+        if (mode === 'single' && turn === BLACK) {
+          setTimeout(aiMove, 500);
+        }
+        return;
+      }
+    } else {
+      // 移動不合法，取消選擇
+      selected = null;
+      renderBoard();
+      return;
+    }
+  }
+
+  // 沒選擇時點空格或敵方棋子不做事
+}
+
+
+  // 取得所有合法走步，回傳格式[{from, to, jump, jumped}]
+  function getAllLegalMoves(bd, color) {
+    let mustJumpPieces = findMandatoryJumps(bd, color);
+    let moves = [];
+    if (mustJumpPieces.length > 0) {
+      for (const p of mustJumpPieces) {
+        moves.push(...getLegalMoves(bd, p.row, p.col, true));
+      }
+    } else {
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const piece = bd[r][c];
+          if (piece && piece.color === color) {
+            moves.push(...getLegalMoves(bd, r, c, false));
+          }
+        }
+      }
+    }
+    return moves;
+  }
+
+  // 隨機AI
+  function aiRandomMove() {
+    const moves = getAllLegalMoves(board, turn);
+    if (moves.length === 0) return null;
+    const move = moves[Math.floor(Math.random() * moves.length)];
+    return move;
+  }
+
+  // 評估函數 (簡單：紅棋正分，黑棋負分；王額外加分)
+  function evaluateBoard(bd) {
+    let score = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = bd[r][c];
+        if (p) {
+          const val = 5 + (p.isKing ? 3 : 0);
+          score += (p.color === RED) ? val : -val;
+        }
+      }
+    }
+    return score;
+  }
+
+  // Minimax with alpha-beta pruning, depth limited
+  function minimax(bd, depth, isMaximizing, alpha, beta) {
+    if (depth === 0) return {score: evaluateBoard(bd)};
+    const player = isMaximizing ? BLACK : RED;
+    if (checkGameOver(bd, player)) {
+      return {score: isMaximizing ? 10000 : -10000};
+    }
+    const moves = getAllLegalMoves(bd, player);
+    if (moves.length === 0) {
+      return {score: isMaximizing ? 10000 : -10000};
+    }
+
+    let bestMove = null;
+
+    if (isMaximizing) {
+      let maxEval = -Infinity;
+      for (const move of moves) {
+        const newBoard = copyBoard(bd);
+        makeMove(newBoard, move);
+
+        // 連跳判定（簡化不做連跳繼續下，避免複雜度爆炸）
+        const evalResult = minimax(newBoard, depth - 1, false, alpha, beta);
+        if (evalResult.score > maxEval) {
+          maxEval = evalResult.score;
+          bestMove = move;
+        }
+        alpha = Math.max(alpha, evalResult.score);
+        if (beta <= alpha) break;
+      }
+      return {score: maxEval, move: bestMove};
+    } else {
+      let minEval = Infinity;
+      for (const move of moves) {
+        const newBoard = copyBoard(bd);
+        makeMove(newBoard, move);
+        const evalResult = minimax(newBoard, depth - 1, true, alpha, beta);
+        if (evalResult.score < minEval) {
+          minEval = evalResult.score;
+          bestMove = move;
+        }
+        beta = Math.min(beta, evalResult.score);
+        if (beta <= alpha) break;
+      }
+      return {score: minEval, move: bestMove};
+    }
+  }
+
+  // AI下棋入口
+  function aiMove() {
+    aiThinking = true;
+    let move = null;
+    if (aiType === 'random') {
+      move = aiRandomMove();
+    } else if (aiType === 'minimax') {
+      const result = minimax(board, 5, true, -Infinity, Infinity);
+      move = result.move;
+    }
+    if (!move) {
+      messageEl.textContent = `遊戲結束，${turn === RED ? '紅方' : '黑方'} 贏！`;
+      aiThinking = false;
+      return;
+    }
+
+    makeMove(board, move);
+
+    // 連跳簡化：AI不連跳，直接換手
+    if (checkGameOver(board, turn === RED ? BLACK : RED)) {
+      messageEl.textContent = `遊戲結束，${turn === RED ? '紅方' : '黑方'} 贏！`;
+      aiThinking = false;
+      renderBoard();
+      return;
+    }
+    switchTurn();
+    aiThinking = false;
+    renderBoard();
+  }
+
+  // 初始化
+  function init() {
+    initBoard();
+    renderBoard();
+    modeSelect.disabled = false;
+    aiSelect.disabled = (modeSelect.value === 'two');
+    messageEl.textContent = `回合：${turn === RED ? '紅方' : '黑方'}`;
+  }
+
+  // 事件
+  resetBtn.addEventListener('click', () => {
+    initBoard();
+    renderBoard();
+    if (mode === 'single' && turn === BLACK) {
+      setTimeout(aiMove, 500);
+    }
+  });
+
+  modeSelect.addEventListener('change', e => {
+    mode = e.target.value;
+    aiSelect.disabled = (mode === 'two');
+    initBoard();
+    renderBoard();
+    if (mode === 'single' && turn === BLACK) {
+      setTimeout(aiMove, 500);
+    }
+  });
+
+  aiSelect.addEventListener('change', e => {
+    aiType = e.target.value;
+  });
+
+  // 進入初始狀態
+  init();
+})();
+</script>
+</body>
+</html>

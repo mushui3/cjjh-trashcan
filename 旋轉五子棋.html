@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>五子棋旋轉版</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: #1a1a1a;
+      color: white;
+    }
+    h1 {
+      margin-top: 20px;
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(6, 60px);
+      grid-template-rows: repeat(6, 60px);
+      gap: 2px;
+      margin: 20px auto;
+      width: fit-content;
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      background: #333;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .cell.white {
+      background: white;
+    }
+    .cell.black {
+      background: black;
+    }
+    .controls {
+      margin: 20px;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 16px;
+    }
+    .winner {
+      font-size: 24px;
+      margin: 10px;
+      color: #00ffcc;
+    }
+  </style>
+</head>
+<body>
+  <h1></h1>
+  <div class="controls">
+    <select id="mode">
+      <option value="pvp">雙人對戰</option>
+      <option value="ai1">diogpt-3.0</option>
+      <option value="ai2">diogpt-84.0</option>
+      <option value="ai3">diogpt-dio</option>
+      <option value="ai4">diogpt-brainstem</option>
+    </select>
+    <button onclick="resetGame()">重新開始</button>
+  </div>
+  <div id="board"></div>
+  <div class="controls" id="rotateControls"></div>
+  <div class="winner" id="winner"></div>
+
+  <script>
+    const boardEl = document.getElementById("board");
+    const rotateControls = document.getElementById("rotateControls");
+    const winnerEl = document.getElementById("winner");
+    const modeSelect = document.getElementById("mode");
+
+    let board = Array.from({ length: 6 }, () => Array(6).fill(null));
+    let currentPlayer = "black";
+    let gameOver = false;
+    let lastMove = null;
+    let phase = "place";
+
+    function renderBoard() {
+      boardEl.innerHTML = "";
+      for (let i = 0; i < 6; i++) {
+        for (let j = 0; j < 6; j++) {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          if (board[i][j]) cell.classList.add(board[i][j]);
+          cell.onclick = () => handleClick(i, j);
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    function renderRotateControls() {
+      rotateControls.innerHTML = "";
+      if (phase !== "rotate") return;
+      if (modeSelect.value.startsWith("ai") && currentPlayer === "white") return;
+      for (let q = 0; q < 4; q++) {
+        ["CW", "CCW"].forEach(dir => {
+          const btn = document.createElement("button");
+          const directionText = dir === "CW" ? "順時針" : "逆時針";
+          btn.textContent = `第 ${q + 1} 區塊 ${directionText}旋轉`;
+          btn.onclick = () => rotateQuadrant(q, dir === "CW");
+          rotateControls.appendChild(btn);
+        });
+      }
+    }
+
+    function handleClick(i, j) {
+      if (gameOver || board[i][j] || phase !== "place") return;
+      board[i][j] = currentPlayer;
+      lastMove = [i, j];
+      phase = "rotate";
+      renderBoard();
+      renderRotateControls();
+
+      if (modeSelect.value.startsWith("ai") && currentPlayer === "white") {
+        setTimeout(() => aiRotate(), 300);
+      }
+    }
+
+    function rotateQuadrant(quadrant, clockwise) {
+      if (phase !== "rotate" || gameOver) return;
+      const row = Math.floor(quadrant / 2) * 3;
+      const col = (quadrant % 2) * 3;
+      const sub = board.slice(row, row + 3).map(r => r.slice(col, col + 3));
+      const rotated = Array.from({ length: 3 }, () => Array(3).fill(null));
+
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          rotated[i][j] = clockwise ? sub[2 - j][i] : sub[j][2 - i];
+        }
+      }
+
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          board[row + i][col + j] = rotated[i][j];
+        }
+      }
+
+      checkWinner();
+      if (!gameOver) {
+        currentPlayer = currentPlayer === "black" ? "white" : "black";
+        phase = "place";
+      }
+      renderBoard();
+      renderRotateControls();
+
+      if (!gameOver && modeSelect.value.startsWith("ai") && currentPlayer === "white" && phase === "place") {
+        setTimeout(aiMove, 300);
+      }
+    }
+
+    function checkWinner() {
+      const directions = [
+        [0, 1], [1, 0], [1, 1], [1, -1]
+      ];
+      const inBounds = (x, y) => x >= 0 && x < 6 && y >= 0 && y < 6;
+
+      for (let i = 0; i < 6; i++) {
+        for (let j = 0; j < 6; j++) {
+          const player = board[i][j];
+          if (!player) continue;
+          for (let [dx, dy] of directions) {
+            let count = 1;
+            let x = i + dx;
+            let y = j + dy;
+            while (inBounds(x, y) && board[x][y] === player) {
+              count++;
+              if (count === 5) {
+                gameOver = true;
+                winnerEl.textContent = `${player === "black" ? "黑子" : "白子"}獲勝！`;
+                return;
+              }
+              x += dx;
+              y += dy;
+            }
+          }
+        }
+      }
+    }
+
+    function aiMove() {
+      if (phase !== "place") return;
+      let emptyCells = [];
+      for (let i = 0; i < 6; i++) {
+        for (let j = 0; j < 6; j++) {
+          if (!board[i][j]) emptyCells.push([i, j]);
+        }
+      }
+      if (emptyCells.length === 0) return;
+      const [i, j] = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+      board[i][j] = currentPlayer;
+      lastMove = [i, j];
+      phase = "rotate";
+      renderBoard();
+
+      setTimeout(() => aiRotate(), 300);
+    }
+
+    function aiRotate() {
+      if (phase !== "rotate") return;
+      const quadrant = Math.floor(Math.random() * 4);
+      const clockwise = Math.random() < 0.5;
+      rotateQuadrant(quadrant, clockwise);
+    }
+
+    function resetGame() {
+      board = Array.from({ length: 6 }, () => Array(6).fill(null));
+      currentPlayer = "black";
+      gameOver = false;
+      phase = "place";
+      winnerEl.textContent = "";
+      renderBoard();
+      renderRotateControls();
+    }
+
+    resetGame();
+  </script>
+</body>
+</html>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+    canvas { border: 2px solid #333; background: #f9f9f9; cursor: pointer; }
+    #info { margin-top: 10px; font-weight: bold; }
+    #controls { margin-bottom: 15px; }
+    label { margin: 0 10px; }
+    select { margin-left: 5px; }
+  </style>
+</head>
+<body>
+
+  <h2></h2>
+
+  <div id="controls">
+    <label><input type="radio" name="mode" id="mode1p" checked> 單人 (玩家藍 vs AI紅)</label>
+    <label><input type="radio" name="mode" id="mode2p"> 雙人</label>
+    <label id="aiLevelLabel">AI難度：
+      <select id="aiLevelSelect">
+        <option value="random">隨機漫步</option>
+        <option value="kill">殺手鐧(尋找贏點)</option>
+        <option value="defense">防守(殺手鐧 + 擋敵方勝利)</option>
+      </select>
+    </label>
+    <button id="resetBtn">重新開始</button>
+  </div>
+
+  <canvas id="gameCanvas" width="450" height="450"></canvas>
+  <div id="info">先手：藍色 (玩家 1) 輪到你下</div>
+
+  <script>
+  // 遊戲參數
+  const SIZE = 9;        // 棋盤大小 9x9
+  const SUBSIZE = 3;     // 區域大小 3x3
+  const CELL_PIX = 50;   // 每格像素大小
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const info = document.getElementById('info');
+  const resetBtn = document.getElementById('resetBtn');
+  const mode1pRadio = document.getElementById('mode1p');
+  const mode2pRadio = document.getElementById('mode2p');
+  const aiLevelSelect = document.getElementById('aiLevelSelect');
+  const aiLevelLabel = document.getElementById('aiLevelLabel');
+
+  // 棋盤與遊戲狀態
+  let board = [];            // [row][col]: 'blue' / 'red' / null
+  let areaWins = [];         // [areaRow][areaCol]: 'blue' / 'red' / 'draw' / null
+  let blueTurn = true;       // 是否藍方(玩家)回合
+  let allowedArea = null;    // 限制可下的區域 {ar, ac} or null不限
+  let gameOver = false;
+  let lastEnemyCell = null;  // 上一次對方下子的位置
+  let mode = '1p';           // '1p' or '2p'
+  let aiLevel = 'random';
+
+  // 初始化
+  function init() {
+    board = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
+    areaWins = Array.from({length: SUBSIZE}, () => Array(SUBSIZE).fill(null));
+    blueTurn = true;
+    allowedArea = null;
+    gameOver = false;
+    lastEnemyCell = null;
+    canvas.style.pointerEvents = 'auto';
+    info.textContent = '先手：藍色 (玩家 1) 輪到你下';
+    draw();
+  }
+
+  // 將 (r,c) 轉成區域索引
+  function toAreaIndex(r,c) {
+    return {ar: Math.floor(r / SUBSIZE), ac: Math.floor(c / SUBSIZE)};
+  }
+
+  // 判斷該格可不可以下棋
+  function canPlace(r,c) {
+    if(gameOver) return false;
+    if(board[r][c]) return false;
+    if(allowedArea) {
+      const {ar, ac} = toAreaIndex(r,c);
+      if(ar !== allowedArea.ar || ac !== allowedArea.ac) return false;
+      if(areaWins[ar][ac]) return false;
+    } else {
+      const {ar, ac} = toAreaIndex(r,c);
+      if(areaWins[ar][ac]) return false;
+    }
+    return true;
+  }
+
+  // 判斷該區域是否已滿
+  function isAreaFull(ar, ac) {
+    for(let r=ar*SUBSIZE; r<(ar+1)*SUBSIZE; r++) {
+      for(let c=ac*SUBSIZE; c<(ac+1)*SUBSIZE; c++) {
+        if(!board[r][c]) return false;
+      }
+    }
+    return true;
+  }
+
+  // 判斷某區域勝利(三子連線)
+  function checkAreaWin(ar, ac) {
+    const startR = ar * SUBSIZE;
+    const startC = ac * SUBSIZE;
+    const lines = [];
+
+    // 橫排
+    for(let r=0; r<SUBSIZE; r++) {
+      const line = [];
+      for(let c=0; c<SUBSIZE; c++) line.push(board[startR + r][startC + c]);
+      lines.push(line);
+    }
+    // 直行
+    for(let c=0; c<SUBSIZE; c++) {
+      const line = [];
+      for(let r=0; r<SUBSIZE; r++) line.push(board[startR + r][startC + c]);
+      lines.push(line);
+    }
+    // 兩條斜線
+    let diag1 = [], diag2 = [];
+    for(let i=0; i<SUBSIZE; i++) {
+      diag1.push(board[startR + i][startC + i]);
+      diag2.push(board[startR + i][startC + SUBSIZE - 1 - i]);
+    }
+    lines.push(diag1, diag2);
+
+    for(const line of lines) {
+      if(line.every(v => v === 'blue')) return 'blue';
+      if(line.every(v => v === 'red')) return 'red';
+    }
+    return null;
+  }
+
+  // 判斷整個遊戲是否有玩家獲勝（先取得五區域勝利）
+  function checkGameWin() {
+    // 簡單計數每方取得勝利區域數
+    let blueCount = 0;
+    let redCount = 0;
+    for(let ar=0; ar<SUBSIZE; ar++) {
+      for(let ac=0; ac<SUBSIZE; ac++) {
+        if(areaWins[ar][ac] === 'blue') blueCount++;
+        if(areaWins[ar][ac] === 'red') redCount++;
+      }
+    }
+    if(blueCount >= 5) return 'blue';
+    if(redCount >= 5) return 'red';
+    return null;
+  }
+
+  // 根據最後一次敵方下子的位置，更新 allowedArea
+  function updateAllowedArea(lastR, lastC) {
+    if(!lastEnemyCell) {
+      allowedArea = null;
+      return;
+    }
+    const localR = lastR % SUBSIZE;
+    const localC = lastC % SUBSIZE;
+    const newAreaR = localR;
+    const newAreaC = localC;
+
+    if(newAreaR < 0 || newAreaR >= SUBSIZE || newAreaC < 0 || newAreaC >= SUBSIZE) {
+      allowedArea = null;
+    } else if(areaWins[newAreaR][newAreaC] || isAreaFull(newAreaR, newAreaC)) {
+      allowedArea = null;
+    } else {
+      allowedArea = {ar: newAreaR, ac: newAreaC};
+    }
+  }
+
+  // 判斷是否輪到AI
+  function isAITurn() {
+    return mode === '1p' && !blueTurn && !gameOver;
+  }
+
+  // AI 行為定義區
+  // 1. 隨機漫步
+  function aiRandom() {
+    const moves = [];
+    for(let r=0; r<SIZE; r++){
+      for(let c=0; c<SIZE; c++){
+        if(canPlace(r,c)) moves.push({r,c});
+      }
+    }
+    if(moves.length === 0) return null;
+    return moves[Math.floor(Math.random()*moves.length)];
+  }
+
+  // 2. 找殺手鐧(先找自己能贏的位置)
+  function aiFindWinningMove(color) {
+    for(let r=0; r<SIZE; r++){
+      for(let c=0; c<SIZE; c++){
+        if(canPlace(r,c)){
+          board[r][c] = color;
+          const {ar,ac} = toAreaIndex(r,c);
+          if(checkAreaWin(ar,ac) === color) {
+            board[r][c] = null;
+            return {r,c};
+          }
+          board[r][c] = null;
+        }
+      }
+    }
+    return null;
+  }
+
+  // 3. 防守(找殺手鐧贏不了就找堵對方贏的)
+  function aiDefense(color) {
+    const enemy = color === 'red' ? 'blue' : 'red';
+    // 找殺手鐧
+    const killMove = aiFindWinningMove(color);
+    if(killMove) return killMove;
+    // 找阻擋敵方勝利
+    for(let r=0; r<SIZE; r++){
+      for(let c=0; c<SIZE; c++){
+        if(canPlace(r,c)){
+          board[r][c] = enemy;
+          const {ar,ac} = toAreaIndex(r,c);
+          if(checkAreaWin(ar,ac) === enemy) {
+            board[r][c] = null;
+            return {r,c};
+          }
+          board[r][c] = null;
+        }
+      }
+    }
+    // 找不到就隨機
+    return aiRandom();
+  }
+
+  // 主AI函數
+  function aiMove() {
+    if(gameOver) return;
+    let move = null;
+    if(aiLevel === 'random') {
+      move = aiRandom();
+    } else if(aiLevel === 'kill') {
+      move = aiFindWinningMove('red') || aiRandom();
+    } else if(aiLevel === 'defense') {
+      move = aiDefense('red');
+    }
+    if(move){
+      board[move.r][move.c] = 'red';
+      lastEnemyCell = {r: move.r, c: move.c};
+      const {ar, ac} = toAreaIndex(move.r, move.c);
+      const winColor = checkAreaWin(ar, ac);
+      if(winColor && !areaWins[ar][ac]){
+        areaWins[ar][ac] = winColor;
+        info.textContent = `${winColor === 'blue' ? '藍色' : '紅色'}取得區域 (${ar+1},${ac+1}) 勝利！`;
+      } else if(isAreaFull(ar, ac) && !areaWins[ar][ac]){
+        areaWins[ar][ac] = 'draw';
+      }
+      const gameWinner = checkGameWin();
+      if(gameWinner){
+        info.textContent = `玩家 ${gameWinner === 'blue' ? '藍色' : '紅色'} 贏了！遊戲結束`;
+        canvas.style.pointerEvents = 'none';
+        gameOver = true;
+      } else {
+        updateAllowedArea(move.r, move.c);
+        blueTurn = true;
+        info.textContent = '輪到藍色 (玩家 1) 下棋' + (allowedArea ? `，可下區域 (${allowedArea.ar+1},${allowedArea.ac+1})` : '，可任意區域');
+      }
+      draw();
+    }
+  }
+
+  // 繪製棋盤與棋子
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 畫背景色（區域勝利標示）
+    for(let ar=0; ar<SUBSIZE; ar++) {
+      for(let ac=0; ac<SUBSIZE; ac++) {
+        if(areaWins[ar][ac] === 'blue') {
+          ctx.fillStyle = 'rgba(0,0,255,0.15)';
+        } else if(areaWins[ar][ac] === 'red') {
+          ctx.fillStyle = 'rgba(255,0,0,0.15)';
+        } else if(areaWins[ar][ac] === 'draw') {
+          ctx.fillStyle = 'rgba(128,128,128,0.1)';
+        } else {
+          ctx.fillStyle = '#fff';
+        }
+        ctx.fillRect(ac*SUBSIZE*CELL_PIX, ar*SUBSIZE*CELL_PIX, SUBSIZE*CELL_PIX, SUBSIZE*CELL_PIX);
+      }
+    }
+
+    // 畫細格線 (1x1格子)
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 1;
+    for(let i=0; i<=SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i*CELL_PIX, 0);
+      ctx.lineTo(i*CELL_PIX, SIZE*CELL_PIX);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i*CELL_PIX);
+      ctx.lineTo(SIZE*CELL_PIX, i*CELL_PIX);
+      ctx.stroke();
+    }
+
+    // 畫粗格線 (3x3區域分界)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 3;
+    for(let i=0; i<=SUBSIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i*SUBSIZE*CELL_PIX, 0);
+      ctx.lineTo(i*SUBSIZE*CELL_PIX, SIZE*CELL_PIX);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i*SUBSIZE*CELL_PIX);
+      ctx.lineTo(SIZE*CELL_PIX, i*SUBSIZE*CELL_PIX);
+      ctx.stroke();
+    }
+
+    // 標示allowedArea區域（如果有）
+    if(allowedArea) {
+      ctx.fillStyle = 'rgba(255, 255, 0, 0.2)';
+      ctx.fillRect(allowedArea.ac * SUBSIZE * CELL_PIX, allowedArea.ar * SUBSIZE * CELL_PIX,
+                   SUBSIZE * CELL_PIX, SUBSIZE * CELL_PIX);
+    }
+
+    // 畫棋子
+    for(let r=0; r<SIZE; r++) {
+      for(let c=0; c<SIZE; c++) {
+        if(board[r][c]) {
+          ctx.beginPath();
+          const centerX = c * CELL_PIX + CELL_PIX/2;
+          const centerY = r * CELL_PIX + CELL_PIX/2;
+          const radius = CELL_PIX/2 - 6;
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.fillStyle = board[r][c] === 'blue' ? 'blue' : 'red';
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // 點擊事件處理
+  canvas.addEventListener('click', e => {
+    if(gameOver) return;
+    if(isAITurn()) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const c = Math.floor(x / CELL_PIX);
+    const r = Math.floor(y / CELL_PIX);
+
+    if(!canPlace(r,c)) return;
+
+    board[r][c] = 'blue';
+    lastEnemyCell = {r,c};
+    const {ar, ac} = toAreaIndex(r,c);
+    const winColor = checkAreaWin(ar, ac);
+    if(winColor && !areaWins[ar][ac]){
+      areaWins[ar][ac] = winColor;
+      info.textContent = `${winColor === 'blue' ? '藍色' : '紅色'}取得區域 (${ar+1},${ac+1}) 勝利！`;
+    } else if(isAreaFull(ar, ac) && !areaWins[ar][ac]){
+      areaWins[ar][ac] = 'draw';
+    }
+
+    const gameWinner = checkGameWin();
+    if(gameWinner){
+      info.textContent = `玩家 ${gameWinner === 'blue' ? '藍色' : '紅色'} 贏了！遊戲結束`;
+      canvas.style.pointerEvents = 'none';
+      gameOver = true;
+      draw();
+      return;
+    }
+
+    updateAllowedArea(r, c);
+
+    blueTurn = false;
+    info.textContent = '輪到紅色 (AI) 下棋' + (allowedArea ? `，可下區域 (${allowedArea.ar+1},${allowedArea.ac+1})` : '，可任意區域');
+    draw();
+
+    if(isAITurn()){
+      setTimeout(aiMove, 400);
+    }
+  });
+
+  // 重設遊戲
+  resetBtn.addEventListener('click', () => {
+    init();
+  });
+
+  // 模式切換
+  function onModeChange() {
+    mode = mode1pRadio.checked ? '1p' : '2p';
+    aiLevelLabel.style.display = mode === '1p' ? 'inline-block' : 'none';
+    init();
+  }
+  mode1pRadio.addEventListener('change', onModeChange);
+  mode2pRadio.addEventListener('change', onModeChange);
+
+  // 難度切換
+  aiLevelSelect.addEventListener('change', () => {
+    aiLevel = aiLevelSelect.value;
+    init();
+  });
+
+  // 啟動遊戲
+  init();
+
+  </script>
+</body>
+</html>
