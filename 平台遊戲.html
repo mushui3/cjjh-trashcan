@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>極限平台冒險 - 專業管理版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+            font-family: 'Segoe UI', sans-serif;
+            user-select: none;
+        }
+        canvas {
+            display: none;
+            image-rendering: pixelated;
+        }
+        .ui-panel {
+            position: absolute;
+            pointer-events: auto;
+            color: white;
+            z-index: 10;
+        }
+        #main-menu, #world-selector {
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+        }
+        #editor-ui {
+            display: none;
+            top: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.95);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            width: 280px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .tool-btn {
+            width: 42px;
+            height: 42px;
+            margin: 2px;
+            border: 2px solid #334155;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .tool-btn.active {
+            border-color: #38bdf8;
+            background: rgba(56, 189, 248, 0.2);
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 主選單 -->
+    <div id="main-menu" class="ui-panel">
+        <h1 class="text-7xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-br from-yellow-400 to-red-500 italic">COIN DASH</h1>
+        <p class="text-sky-400 mb-12 tracking-widest uppercase font-semibold">管理世界 • 收集金幣 • 極速通關</p>
+        
+        <div class="flex flex-col gap-4 w-64">
+            <button onclick="showWorldSelector('PLAY')" class="bg-sky-600 hover:bg-sky-500 py-4 rounded-xl font-bold text-xl transition-all">開始遊戲</button>
+            <button onclick="showWorldSelector('EDIT')" class="bg-slate-800 hover:bg-slate-700 py-4 rounded-xl font-bold text-xl transition-all border border-slate-600">世界編輯器</button>
+        </div>
+    </div>
+
+    <!-- 世界選擇器 -->
+    <div id="world-selector" class="ui-panel" style="display:none;">
+        <h2 class="text-3xl font-bold mb-6">選擇世界</h2>
+        <div id="world-list" class="flex flex-col gap-3 w-80 max-h-[60vh] overflow-y-auto mb-6 p-2">
+            <!-- 動態生成 -->
+        </div>
+        <div class="flex gap-4">
+            <button onclick="createNewWorld()" class="bg-emerald-600 px-6 py-2 rounded-lg font-bold">創建新世界</button>
+            <button onclick="backToMainMenu()" class="bg-slate-700 px-6 py-2 rounded-lg font-bold">返回</button>
+        </div>
+    </div>
+
+    <!-- 遊戲中 HUD -->
+    <div class="ui-panel top-5 left-5 pointer-events-none" id="game-hud" style="display:none;">
+        <div class="bg-slate-900/80 p-4 rounded-2xl border border-slate-700 flex gap-6 items-center">
+            <div>
+                <div class="flex items-center gap-2">
+                    <div id="hud-world-name" class="text-sky-400 text-[10px] font-bold uppercase">WORLD</div>
+                    <div id="hud-world-type" class="bg-red-500 text-[8px] px-1 rounded text-white font-bold hidden">EXTREME</div>
+                </div>
+                <div id="hud-lives" class="text-xl tracking-tighter">❤️❤️❤️</div>
+            </div>
+            <div class="text-center">
+                <div class="text-slate-400 text-[10px] uppercase font-bold">Score</div>
+                <div id="hud-score" class="text-2xl font-mono font-bold text-yellow-400">0</div>
+            </div>
+            <div class="text-center">
+                <div class="text-slate-400 text-[10px] uppercase font-bold">Time</div>
+                <div id="hud-timer" class="text-2xl font-mono font-bold text-white">0.0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 編輯器 UI -->
+    <div id="editor-ui" class="ui-panel flex flex-col gap-4">
+        <div class="flex flex-col border-b border-slate-700 pb-2">
+            <span id="editor-world-title" class="font-bold text-sky-400 truncate text-sm">世界名稱</span>
+            <div class="flex items-center justify-between mt-1">
+                <span id="editor-level-indicator" class="text-[10px] bg-slate-700 px-2 py-1 rounded font-mono">1/1</span>
+                <button id="world-type-toggle" onclick="toggleWorldType()" class="text-[9px] px-2 py-1 rounded font-bold uppercase bg-slate-800 text-slate-400">類型: 普通</button>
+            </div>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-2">
+            <button onclick="prevLevelEditor()" class="bg-slate-700 py-1 rounded text-xs">上關</button>
+            <button onclick="nextLevelEditor()" class="bg-slate-700 py-1 rounded text-xs">下關</button>
+            <button onclick="addNewLevel()" class="col-span-2 bg-sky-700 py-1 rounded text-xs font-bold">+ 新增關卡</button>
+        </div>
+
+        <div>
+            <div class="font-bold mb-2 text-slate-400 text-[10px] uppercase">工具箱</div>
+            <div class="grid grid-cols-4 gap-1">
+                <div class="tool-btn active" data-type="1" title="方塊" style="background: #38bdf8;">塊</div>
+                <div class="tool-btn" data-type="2" title="岩漿" style="background: #ef4444;">火</div>
+                <div class="tool-btn" data-type="3" title="彈簧" style="background: #fbbf24;">彈</div>
+                <div class="tool-btn" data-type="4" title="終點" style="background: #22c55e;">旗</div>
+                <div class="tool-btn" data-type="5" title="動平台" style="background: #a855f7;">動</div>
+                <div class="tool-btn" data-type="6" title="尖刺" style="background: #64748b;">刺</div>
+                <div class="tool-btn" data-type="7" title="半格" style="background: #f97316;">半</div>
+                <div class="tool-btn" data-type="12" title="金幣" style="background: #eab308; color: #000;">$</div>
+                <div class="tool-btn" data-type="8" title="存檔點" style="background: #10b981;">存</div>
+                <div class="tool-btn" data-type="9" title="入口" style="background: #1e40af;">入</div>
+                <div class="tool-btn" data-type="10" title="出口" style="background: #991b1b;">出</div>
+                <div class="tool-btn" data-type="11" title="怪物" style="background: #db2777;">怪</div>
+                <div class="tool-btn col-span-4 bg-slate-800" data-type="0">橡皮擦</div>
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-2 mt-2 pt-4 border-t border-slate-700">
+            <button onclick="testWorld()" class="bg-sky-500 py-2 rounded font-bold text-slate-900">進入測試</button>
+            <button onclick="clearCurrentLevel()" class="bg-red-900/40 py-1 rounded text-[10px]">清空目前關卡</button>
+            <button onclick="exitToWorldSelector()" class="text-slate-400 hover:text-white text-xs py-2">保存並退出</button>
+        </div>
+    </div>
+
+    <!-- 結算彈窗 -->
+    <div id="modal" class="modal">
+        <div class="bg-slate-900 p-8 rounded-3xl border border-slate-700 max-w-sm w-full text-center">
+            <h2 id="modal-title" class="text-4xl font-black mb-2 text-sky-400 tracking-tight">GAME OVER</h2>
+            <p id="modal-msg" class="text-slate-400 mb-6">訊息內容</p>
+            <div class="bg-slate-800/50 p-6 rounded-2xl grid grid-cols-2 gap-4 mb-8">
+                <div>
+                    <div class="text-[10px] text-slate-500 uppercase font-bold">SCORE</div>
+                    <div id="modal-score" class="text-2xl font-mono text-yellow-400">0</div>
+                </div>
+                <div>
+                    <div class="text-[10px] text-slate-500 uppercase font-bold">TIME</div>
+                    <div id="modal-time" class="text-2xl font-mono text-white">0.0</div>
+                </div>
+                <div class="col-span-2 border-t border-slate-700 pt-2">
+                    <div class="text-[10px] text-slate-500 uppercase font-bold">BONUS (LIVES)</div>
+                    <div id="modal-bonus" class="text-xl font-mono text-emerald-400">+0</div>
+                </div>
+            </div>
+            <div class="flex flex-col gap-3">
+                <button id="modal-primary" class="bg-sky-600 hover:bg-sky-500 py-4 rounded-xl font-bold transition-all">再試一次</button>
+                <button onclick="exitToWorldSelector()" class="text-slate-500 hover:text-slate-300">回世界選單</button>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const TILE_SIZE = 40;
+        const GRAVITY = 0.52;
+        const FRICTION = 0.82;
+        const JUMP_FORCE = -11.5;
+        const MOVE_SPEED = 0.65;
+        const MAX_SPEED = 5.5;
+
+        // --- 資料管理 ---
+        let allWorlds = [];
+        let currentWorldIdx = 0;
+        let worldLevelIdx = 0;
+        let gameState = 'MENU';
+        let targetState = 'PLAY'; 
+        
+        let lives = 3;
+        let score = 0;
+        let timer = 0;
+        let lastTime = 0;
+        let player = { x: 120, y: 120, vx: 0, vy: 0, width: 24, height: 36, grounded: false };
+        let camera = { x: 0, y: 0 };
+        let entities = { platforms: [], monsters: [], coins: [], portals: { in: null, out: null } };
+        let checkpoint = null;
+        let keys = {};
+        let selectedTool = '1';
+
+        // 生成預設世界的輔助函數
+        function createEmptyGrid(w, h) { return Array(h).fill().map(() => Array(w).fill(0)); }
+
+        const DEFAULT_WORLDS = [
+            {
+                name: "冒險之源 (Adventure Origin)",
+                type: "NORMAL",
+                levels: [
+                    { name: "1-1", data: [[0,0,0,0,12,0],[0,0,12,0,0,4],[1,1,1,1,1,1]] },
+                    { name: "1-2", data: [[0,0,12,0,0],[0,0,0,0,4],[1,1,2,2,1]] },
+                    { name: "1-3", data: [[0,12,12,0],[0,0,0,4],[1,6,6,1]] },
+                    { name: "1-4", data: [[0,0,0,0],[12,12,12,4],[1,1,1,1]] },
+                    { name: "1-5", data: [[0,0,5,0],[0,0,0,4],[1,0,0,1]] },
+                    { name: "1-6", data: [[0,11,12,0],[0,0,0,4],[1,1,1,1]] }
+                ]
+            },
+            {
+                name: "熔岩迷宮 (Lava Labyrinth)",
+                type: "EXTREME",
+                levels: [
+                    { name: "2-1", data: [[0,12,12,0],[0,0,0,4],[1,2,2,1]] },
+                    { name: "2-2", data: [[0,12,0,0],[5,0,0,4],[1,2,2,1]] },
+                    { name: "2-3", data: [[0,12,11,0],[0,0,0,4],[1,1,1,1]] },
+                    { name: "2-4", data: [[0,12,12,0],[0,0,6,4],[1,1,1,1]] },
+                    { name: "2-5", data: [[12,0,12,0],[0,5,0,4],[1,2,2,1]] },
+                    { name: "2-6", data: [[0,11,11,0],[12,12,12,4],[1,1,1,1]] }
+                ]
+            }
+        ];
+
+        // 確保關卡數據寬度足夠
+        function sanitizeWorlds(worlds) {
+            worlds.forEach(w => {
+                w.levels.forEach(l => {
+                    const maxW = Math.max(15, Math.max(...l.data.map(r => r.length)));
+                    l.data.forEach(row => {
+                        while(row.length < maxW) row.push(0);
+                    });
+                    if(l.data.length < 12) {
+                        while(l.data.length < 12) l.data.push(Array(maxW).fill(0));
+                    }
+                });
+            });
+            return worlds;
+        }
+
+        // --- 初始化 ---
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            window.addEventListener('keydown', e => keys[e.code] = true);
+            window.addEventListener('keyup', e => keys[e.code] = false);
+            canvas.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', () => isPanning = false);
+            
+            const saved = localStorage.getItem('platformer_v5_all_worlds');
+            allWorlds = saved ? JSON.parse(saved) : sanitizeWorlds(JSON.parse(JSON.stringify(DEFAULT_WORLDS)));
+            
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedTool = btn.getAttribute('data-type');
+                });
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function backToMainMenu() {
+            gameState = 'MENU';
+            document.getElementById('main-menu').style.display = 'flex';
+            document.getElementById('world-selector').style.display = 'none';
+            canvas.style.display = 'none';
+        }
+
+        function showWorldSelector(mode) {
+            targetState = mode;
+            gameState = 'SELECTOR';
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('world-selector').style.display = 'flex';
+            renderWorldList();
+        }
+
+        function renderWorldList() {
+            const list = document.getElementById('world-list');
+            list.innerHTML = '';
+            allWorlds.forEach((w, idx) => {
+                const btn = document.createElement('div');
+                btn.className = "flex gap-2 items-center bg-slate-800 p-3 rounded-xl hover:bg-slate-700 cursor-pointer transition-all border border-slate-700";
+                const typeLabel = w.type === 'EXTREME' ? '<span class="text-[8px] bg-red-600 px-1 rounded ml-1">極限</span>' : '<span class="text-[8px] bg-slate-600 px-1 rounded ml-1">普通</span>';
+                btn.innerHTML = `
+                    <div class="flex-1 font-bold truncate text-sm">${w.name}${typeLabel}</div>
+                    <div class="text-[10px] bg-slate-900 px-2 py-1 rounded text-slate-400">${w.levels.length} 關</div>
+                `;
+                btn.onclick = () => selectWorld(idx);
+                list.appendChild(btn);
+            });
+        }
+
+        function selectWorld(idx) {
+            currentWorldIdx = idx;
+            document.getElementById('world-selector').style.display = 'none';
+            canvas.style.display = 'block';
+            
+            if(targetState === 'PLAY') {
+                gameState = 'PLAYING';
+                document.getElementById('game-hud').style.display = 'block';
+                const typeTag = document.getElementById('hud-world-type');
+                if(allWorlds[idx].type === 'EXTREME') typeTag.classList.remove('hidden');
+                else typeTag.classList.add('hidden');
+                
+                lives = 3; score = 0; timer = 0; lastTime = 0; checkpoint = null;
+                startLevel(0);
+            } else {
+                gameState = 'EDITOR';
+                document.getElementById('editor-ui').style.display = 'flex';
+                updateEditorTypeUI();
+                startLevel(0);
+            }
+        }
+
+        function createNewWorld() {
+            const name = prompt("世界名稱:", "我的新冒險");
+            if(!name) return;
+            allWorlds.push({
+                name: name,
+                type: "NORMAL",
+                levels: [{ name: "Level 1", data: createEmptyGrid(30, 12) }]
+            });
+            saveToLocal();
+            renderWorldList();
+        }
+
+        function startLevel(idx) {
+            worldLevelIdx = idx;
+            const world = allWorlds[currentWorldIdx];
+            const level = world.levels[idx];
+            
+            if(checkpoint && checkpoint.levelIdx === idx) {
+                player.x = checkpoint.x; player.y = checkpoint.y;
+            } else {
+                player.x = 120; player.y = 120;
+            }
+            player.vx = 0; player.vy = 0; player.grounded = false;
+
+            // 初始化實體（包含金幣重置）
+            entities = { platforms: [], monsters: [], coins: [], portals: { in: null, out: null } };
+            level.data.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    const px = x * TILE_SIZE, py = y * TILE_SIZE;
+                    if(cell === 5) entities.platforms.push({ x: px, y: py, baseX: px, range: 120, dir: 1, speed: 2 });
+                    if(cell === 11) entities.monsters.push({ x: px, y: py, vx: 1.5, width: 32, height: 32 });
+                    if(cell === 12) entities.coins.push({ x: px + TILE_SIZE/2, y: py + TILE_SIZE/2, gx: x, gy: y });
+                    if(cell === 9) entities.portals.in = { x: px + 10, y: py + 10 };
+                    if(cell === 10) entities.portals.out = { x: px + 10, y: py + 10 };
+                });
+            });
+
+            if(gameState === 'EDITOR') {
+                document.getElementById('editor-world-title').innerText = world.name;
+                document.getElementById('editor-level-indicator').innerText = `${idx+1} / ${world.levels.length}`;
+            } else {
+                document.getElementById('hud-world-name').innerText = world.name;
+            }
+        }
+
+        // --- 編輯器類型切換 ---
+        function toggleWorldType() {
+            const world = allWorlds[currentWorldIdx];
+            world.type = world.type === 'NORMAL' ? 'EXTREME' : 'NORMAL';
+            updateEditorTypeUI();
+            saveToLocal();
+        }
+
+        function updateEditorTypeUI() {
+            const btn = document.getElementById('world-type-toggle');
+            const type = allWorlds[currentWorldIdx].type;
+            btn.innerText = `類型: ${type === 'NORMAL' ? '普通' : '極限'}`;
+            btn.className = `text-[9px] px-2 py-1 rounded font-bold uppercase ${type === 'NORMAL' ? 'bg-slate-800 text-slate-400' : 'bg-red-900 text-red-200'}`;
+        }
+
+        // --- 核心更新邏輯 ---
+        function update(dt) {
+            if(gameState !== 'PLAYING') return;
+            timer += dt;
+
+            if(keys['ArrowLeft'] || keys['KeyA']) { if(player.vx > -MAX_SPEED) player.vx -= MOVE_SPEED; }
+            else if(keys['ArrowRight'] || keys['KeyD']) { if(player.vx < MAX_SPEED) player.vx += MOVE_SPEED; }
+            else player.vx *= FRICTION;
+
+            if((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.grounded) {
+                player.vy = JUMP_FORCE; player.grounded = false;
+            }
+
+            player.vy += GRAVITY;
+            player.x += player.vx;
+            checkCollisions(true);
+            player.y += player.vy;
+            player.grounded = false;
+            checkCollisions(false);
+
+            if(player.y > 1500) die();
+
+            entities.platforms.forEach(p => {
+                p.x += p.speed * p.dir;
+                if(Math.abs(p.x - p.baseX) > p.range) p.dir *= -1;
+            });
+
+            entities.monsters.forEach(m => {
+                m.x += m.vx;
+                const gx = Math.floor((m.vx > 0 ? m.x + m.width + 5 : m.x - 5) / TILE_SIZE);
+                const gy = Math.floor(m.y / TILE_SIZE);
+                const map = allWorlds[currentWorldIdx].levels[worldLevelIdx].data;
+                if(map[gy]?.[gx] === 1 || map[gy]?.[gx] === 2 || map[gy]?.[gx] === 6) m.vx *= -1;
+                if(rectIntersect(player.x, player.y, player.width, player.height, m.x, m.y, m.width, m.height)) die();
+            });
+
+            entities.coins.forEach((c, i) => {
+                const dist = Math.hypot((player.x + player.width/2) - c.x, (player.y + player.height/2) - c.y);
+                if(dist < 28) {
+                    score += 100;
+                    entities.coins.splice(i, 1);
+                }
+            });
+
+            camera.x += (player.x - canvas.width/2 - camera.x) * 0.1;
+            camera.y += (player.y - canvas.height/2 - camera.y) * 0.1;
+        }
+
+        function checkCollisions(isHorizontal) {
+            const map = allWorlds[currentWorldIdx].levels[worldLevelIdx].data;
+            const bounds = {
+                l: Math.floor(player.x / TILE_SIZE),
+                r: Math.floor((player.x + player.width) / TILE_SIZE),
+                t: Math.floor(player.y / TILE_SIZE),
+                b: Math.floor((player.y + player.height) / TILE_SIZE)
+            };
+
+            for(let y = bounds.t; y <= bounds.b; y++) {
+                for(let x = bounds.l; x <= bounds.r; x++) {
+                    const type = map[y]?.[x];
+                    if(!type || type >= 11) continue;
+                    const tx = x * TILE_SIZE, ty = y * TILE_SIZE;
+                    if(type === 2) {
+                        if(rectIntersect(player.x, player.y, player.width, player.height, tx, ty + 15, TILE_SIZE, TILE_SIZE - 15)) { die(); return; }
+                    } else if(type === 6) {
+                        if(rectIntersect(player.x, player.y, player.width, player.height, tx + 5, ty + 20, TILE_SIZE - 10, 20)) { die(); return; }
+                    } else if(type === 4) {
+                        if(rectIntersect(player.x, player.y, player.width, player.height, tx, ty, TILE_SIZE, TILE_SIZE)) { nextLevel(); return; }
+                    } else if(type === 8) {
+                        checkpoint = { x: tx, y: ty, levelIdx: worldLevelIdx };
+                    } else if(type === 9 && entities.portals.out) {
+                        player.x = entities.portals.out.x; player.y = entities.portals.out.y; return;
+                    } else {
+                        let bh = TILE_SIZE, by = ty;
+                        if(type === 7) { bh = 20; by = ty + 20; }
+                        collide(tx, by, TILE_SIZE, bh, isHorizontal, type === 3);
+                    }
+                }
+            }
+            entities.platforms.forEach(p => collide(p.x, p.y, TILE_SIZE, 15, isHorizontal, false, p.speed * p.dir));
+        }
+
+        function collide(bx, by, bw, bh, isHorizontal, bouncy, moveX = 0) {
+            if (rectIntersect(player.x, player.y, player.width, player.height, bx, by, bw, bh)) {
+                if (isHorizontal) {
+                    if (player.vx > 0) player.x = bx - player.width;
+                    else if (player.vx < 0) player.x = bx + bw;
+                    player.vx = 0;
+                } else {
+                    if (player.vy > 0) {
+                        player.y = by - player.height;
+                        player.grounded = true;
+                        player.vy = bouncy ? JUMP_FORCE * 1.3 : 0;
+                        player.x += moveX;
+                    } else if (player.vy < 0) {
+                        player.y = by + bh;
+                        player.vy = 0;
+                    }
+                }
+            }
+        }
+
+        function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+            return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
+        }
+
+        function die() {
+            lives--;
+            if(lives <= 0) {
+                gameState = 'MODAL';
+                const bonus = 0;
+                const finalScore = Math.max(0, score - Math.floor(timer * 2));
+                showModal("挑戰結束", "你已經耗盡所有生命", "重新開始", () => selectWorld(currentWorldIdx), finalScore, bonus);
+            } else {
+                const world = allWorlds[currentWorldIdx];
+                if(world.type === 'EXTREME') {
+                    // 極限模式：回第一關
+                    checkpoint = null;
+                    startLevel(0);
+                } else {
+                    // 普通模式：回本關
+                    startLevel(worldLevelIdx);
+                }
+            }
+        }
+
+        function nextLevel() {
+            if(worldLevelIdx < allWorlds[currentWorldIdx].levels.length - 1) {
+                startLevel(worldLevelIdx + 1);
+            } else {
+                gameState = 'MODAL';
+                const bonus = lives * 500;
+                const finalScore = Math.max(0, score - Math.floor(timer * 2) + bonus);
+                showModal("世界通關！", "恭喜完成本世界所有挑戰！", "回選單", exitToWorldSelector, finalScore, bonus);
+            }
+        }
+
+        // --- 繪製 ---
+        function draw() {
+            if(gameState === 'MENU' || gameState === 'SELECTOR') return;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(-camera.x, -camera.y);
+
+            const map = allWorlds[currentWorldIdx].levels[worldLevelIdx].data;
+            if(gameState === 'EDITOR') {
+                ctx.strokeStyle = '#1e293b';
+                for(let i=0; i<50; i++) {
+                    ctx.beginPath(); ctx.moveTo(i*TILE_SIZE, 0); ctx.lineTo(i*TILE_SIZE, 1000); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, i*TILE_SIZE); ctx.lineTo(2000, i*TILE_SIZE); ctx.stroke();
+                }
+            }
+
+            map.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    if(cell !== 0 && cell !== 5 && cell !== 11 && cell !== 12) drawTile(x * TILE_SIZE, y * TILE_SIZE, cell);
+                });
+            });
+
+            entities.coins.forEach(c => drawTile(c.x - TILE_SIZE/2, c.y - TILE_SIZE/2, 12));
+            entities.platforms.forEach(p => drawTile(p.x, p.y, 5));
+            entities.monsters.forEach(m => drawTile(m.x, m.y, 11));
+
+            if(gameState !== 'EDITOR') {
+                ctx.fillStyle = '#38bdf8';
+                ctx.shadowBlur = 15; ctx.shadowColor = '#38bdf8';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+                ctx.shadowBlur = 0;
+            }
+            ctx.restore();
+        }
+
+        function drawTile(x, y, type) {
+            ctx.beginPath();
+            if(type === 1) { ctx.fillStyle = '#38bdf8'; ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE); }
+            else if(type === 2) { 
+                ctx.fillStyle = '#ef4444'; ctx.fillRect(x, y + 15, TILE_SIZE, TILE_SIZE - 15); 
+                ctx.fillStyle = '#f87171'; ctx.fillRect(x, y + 15, TILE_SIZE, 4);
+            }
+            else if(type === 3) { ctx.fillStyle = '#fbbf24'; ctx.fillRect(x, y + 32, TILE_SIZE, 8); }
+            else if(type === 4) { ctx.fillStyle = '#22c55e'; ctx.fillRect(x+18, y, 4, TILE_SIZE); ctx.fillStyle = '#ef4444'; ctx.fillRect(x+22, y, 15, 10); }
+            else if(type === 5) { ctx.fillStyle = '#a855f7'; ctx.fillRect(x, y, TILE_SIZE, 15); }
+            else if(type === 6) { ctx.fillStyle = '#64748b'; ctx.moveTo(x, y+TILE_SIZE); ctx.lineTo(x+TILE_SIZE/2, y+10); ctx.lineTo(x+TILE_SIZE, y+TILE_SIZE); ctx.fill(); }
+            else if(type === 7) { ctx.fillStyle = '#f97316'; ctx.fillRect(x, y + 20, TILE_SIZE, 20); }
+            else if(type === 8) { ctx.fillStyle = checkpoint?.x === x ? '#10b981' : '#334155'; ctx.fillRect(x+12, y+10, 16, 30); }
+            else if(type === 9 || type === 10) { ctx.strokeStyle = type===9 ? '#3b82f6' : '#ef4444'; ctx.lineWidth=3; ctx.strokeRect(x+8, y+8, 24, 24); }
+            else if(type === 11) { ctx.fillStyle = '#db2777'; ctx.fillRect(x, y+8, 32, 32); ctx.fillStyle='white'; ctx.fillRect(x+6, y+14, 6, 6); ctx.fillRect(x+20, y+14, 6, 6); }
+            else if(type === 12) { 
+                ctx.fillStyle = '#eab308'; ctx.arc(x+TILE_SIZE/2, y+TILE_SIZE/2, 10, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2; ctx.stroke();
+            }
+        }
+
+        // --- 編輯器操作 ---
+        let isPanning = false;
+        let lastMousePos = { x: 0, y: 0 };
+        function onMouseDown(e) {
+            if(gameState !== 'EDITOR') return;
+            if(e.button === 2 || keys['Space']) {
+                isPanning = true; lastMousePos = { x: e.clientX, y: e.clientY };
+            } else paintAt(e.clientX, e.clientY);
+        }
+        function onMouseMove(e) {
+            if(isPanning) {
+                camera.x -= (e.clientX - lastMousePos.x);
+                camera.y -= (e.clientY - lastMousePos.y);
+                lastMousePos = { x: e.clientX, y: e.clientY };
+            } else if(gameState === 'EDITOR' && e.buttons === 1) paintAt(e.clientX, e.clientY);
+        }
+        function paintAt(mx, my) {
+            const gx = Math.floor((mx + camera.x) / TILE_SIZE);
+            const gy = Math.floor((my + camera.y) / TILE_SIZE);
+            const level = allWorlds[currentWorldIdx].levels[worldLevelIdx];
+            if(gy >= 0 && gy < level.data.length && gx >= 0) {
+                while(gx >= level.data[0].length) level.data.forEach(row => row.push(0));
+                level.data[gy][gx] = parseInt(selectedTool);
+                startLevel(worldLevelIdx);
+            }
+        }
+        function addNewLevel() {
+            allWorlds[currentWorldIdx].levels.push({ name: `Level ${allWorlds[currentWorldIdx].levels.length+1}`, data: createEmptyGrid(30, 12) });
+            startLevel(allWorlds[currentWorldIdx].levels.length - 1);
+            saveToLocal();
+        }
+        function prevLevelEditor() { if (worldLevelIdx > 0) startLevel(worldLevelIdx - 1); }
+        function nextLevelEditor() { if (worldLevelIdx < allWorlds[currentWorldIdx].levels.length - 1) startLevel(worldLevelIdx + 1); }
+        function testWorld() {
+            saveToLocal();
+            gameState = 'PLAYING';
+            document.getElementById('editor-ui').style.display = 'none';
+            document.getElementById('game-hud').style.display = 'block';
+            lives = 3; score = 0; timer = 0; lastTime = 0; checkpoint = null;
+            startLevel(0);
+        }
+        function clearCurrentLevel() {
+            if(confirm("確定清空嗎？")) {
+                allWorlds[currentWorldIdx].levels[worldLevelIdx].data = createEmptyGrid(30, 12);
+                startLevel(worldLevelIdx);
+            }
+        }
+        function exitToWorldSelector() {
+            saveToLocal();
+            gameState = 'SELECTOR';
+            document.getElementById('editor-ui').style.display = 'none';
+            document.getElementById('game-hud').style.display = 'none';
+            document.getElementById('world-selector').style.display = 'flex';
+            hideModal();
+            renderWorldList();
+        }
+        function saveToLocal() { localStorage.setItem('platformer_v5_all_worlds', JSON.stringify(allWorlds)); }
+
+        function showModal(title, msg, btnText, action, finalScore, bonus) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-msg').innerText = msg;
+            document.getElementById('modal-score').innerText = Math.floor(finalScore);
+            document.getElementById('modal-time').innerText = timer.toFixed(1);
+            document.getElementById('modal-bonus').innerText = `+${bonus}`;
+            document.getElementById('modal-primary').innerText = btnText;
+            document.getElementById('modal-primary').onclick = () => { hideModal(); action(); };
+            document.getElementById('modal').style.display = 'flex';
+        }
+        function hideModal() { document.getElementById('modal').style.display = 'none'; }
+
+        function gameLoop(ts) {
+            if(!lastTime) lastTime = ts;
+            const dt = Math.min(0.05, (ts - lastTime) / 1000);
+            lastTime = ts;
+            if(gameState === 'PLAYING') {
+                update(dt);
+                document.getElementById('hud-lives').innerText = "❤️".repeat(Math.max(0, lives));
+                document.getElementById('hud-score').innerText = score;
+                document.getElementById('hud-timer').innerText = timer.toFixed(1);
+            }
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        window.onload = init;
+    </script>
+</body>
+</html>
