@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>大型象棋</title>
+    <style>
+        :root {
+            --cell-size: 45px;
+            --board-color: #f4d0a2;
+            --line-color: #4e342e;
+            --red-piece: #d32f2f;
+            --black-piece: #212121;
+        }
+        body {
+            display: flex; justify-content: center; align-items: flex-start;
+            background-color: #1a1a1a; color: #eee; font-family: "Microsoft JhengHei", sans-serif;
+            margin: 0; padding: 20px; gap: 20px;
+        }
+        /* 佈局 */
+        #game-container { display: flex; flex-direction: column; align-items: center; }
+        #side-panel { width: 320px; display: flex; flex-direction: column; gap: 15px; height: 850px; }
+        
+        /* 棋盤 */
+        #board-container {
+            position: relative; background-color: var(--board-color);
+            padding: 10px; border: 4px solid #5d4037; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .board {
+            display: grid; grid-template-columns: repeat(15, var(--cell-size));
+            grid-template-rows: repeat(17, var(--cell-size));
+        }
+        .cell {
+            width: var(--cell-size); height: var(--cell-size); position: relative;
+            display: flex; justify-content: center; align-items: center; cursor: pointer;
+        }
+        .cell::before { content: ""; position: absolute; width: 100%; height: 1px; background: var(--line-color); top: 50%; left: 0; }
+        .cell::after { content: ""; position: absolute; width: 1px; height: 100%; background: var(--line-color); left: 50%; top: 0; }
+        
+        /* 河界 */
+        .river-cell::after { display: none; }
+        .river-text { position: absolute; width: 100%; text-align: center; color: var(--line-color); font-weight: bold; font-size: 1.2rem; pointer-events: none; z-index: 2; }
+
+        /* 棋子 */
+        .piece {
+            width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 2px solid #333;
+            display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 20px;
+            z-index: 10; user-select: none; transition: transform 0.1s;
+        }
+        .piece.red { color: var(--red-piece); border-color: var(--red-piece); }
+        .piece.black { color: var(--black-piece); border-color: var(--black-piece); }
+        .piece.selected { background: #ffeb3b; box-shadow: 0 0 15px #fff; transform: scale(1.1); }
+        .hint { width: 14px; height: 14px; background: rgba(76, 175, 80, 0.7); border-radius: 50%; z-index: 5; }
+        .hint.snipe { background: rgba(244, 67, 54, 0.8); }
+
+        /* 面板組件 */
+        .panel-box { background: #333; padding: 15px; border-radius: 8px; border: 1px solid #444; }
+        #history { height: 200px; overflow-y: auto; font-size: 14px; font-family: monospace; background: #222; padding: 5px; }
+        #guide { flex-grow: 1; overflow-y: auto; font-size: 13px; line-height: 1.6; }
+        h3 { margin-top: 0; color: #ffca28; border-bottom: 1px solid #555; padding-bottom: 5px; }
+        .move-entry { border-bottom: 1px solid #444; padding: 2px 0; }
+        .red-text { color: #ff5252; }
+        .black-text { color: #aaa; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="board-container">
+        <!-- 皇城 -->
+        <div style="position:absolute; border:2px dashed #795548; top:10px; left:calc(5 * var(--cell-size) + 10px); width:calc(5 * var(--cell-size)); height:calc(5 * var(--cell-size)); pointer-events:none;"></div>
+        <div style="position:absolute; border:2px dashed #795548; bottom:10px; left:calc(5 * var(--cell-size) + 10px); width:calc(5 * var(--cell-size)); height:calc(5 * var(--cell-size)); pointer-events:none;"></div>
+        <div id="board" class="board"></div>
+    </div>
+</div>
+
+<div id="side-panel">
+    <div class="panel-box">
+        <h3>遊戲控制</h3>
+        模式：<select id="gameMode" onchange="resetGame()">
+            <option value="PvE">電腦(黑) vs 人類(紅)</option>
+            <option value="PvP">人類對人類</option>
+        </select><br><br>
+        難度：<select id="aiDepth">
+            <option value="1">初級</option>
+            <option value="2" selected>中級</option>
+        </select>
+        <p id="status">當前回合：紅方</p>
+        <button onclick="resetGame()" style="width:100%; padding:10px; background:#5d4037; color:white; border:none; cursor:pointer;">重新開始</button>
+    </div>
+
+    <div class="panel-box">
+        <h3>移動歷程</h3>
+        <div id="history"></div>
+    </div>
+
+    <div class="panel-box" id="guide">
+        <h3>遊戲指南 (一方 40 枚)</h3>
+        <b>新兵種說明：</b><br>
+        • <b>弩 (X)</b>：移1-2格。技能[狙擊]：隔一子原地擊殺敵子。<br>
+        • <b>騎 (C)</b>：2直1斜大L走法。前兩格不可有子(雙蹩腳)。<br>
+        • <b>諜 (D)</b>：斜走1。過河後加橫豎走。除非敵子在諜的攻擊範圍內，否則不能吃諜。<br>
+        • <b>投 (T)</b>：移1格。吃子需跳過一子攻擊「目」字格。<br>
+        <b>強化傳統：</b><br>
+        • <b>兵/卒</b>：過河後可橫走及「斜向前」吃子。<br>
+        • <b>將/帥</b>：活動於 5x5 皇城。<br>
+        • <b>相/象</b>：12個落點，不可過河，塞象眼。
+    </div>
+</div>
+
+<script>
+/** 核心設定 **/
+const ROWS = 17, COLS = 15;
+const RED = 'red', BLACK = 'black';
+const RIVER_ROW = 8;
+let board = [];
+let selectedSquare = null;
+let validMoves = [];
+let turn = RED;
+let isAiThinking = false;
+
+const PIECE_VALS = { K:10000, R:1000, H:450, P:500, E:250, A:250, S:100, X:550, C:600, D:350, T:400 };
+const PIECE_NAMES = {
+    red:   { K:'帥', A:'仕', E:'相', R:'俥', H:'傌', P:'砲', S:'兵', X:'弩', C:'騎', D:'諜', T:'投' },
+    black: { K:'將', A:'士', E:'象', R:'車', H:'馬', P:'炮', S:'卒', X:'弩', C:'騎', D:'諜', T:'投' }
+};
+
+/** 佈局初始化 **/
+function initBoard() {
+    board = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
+    setupSide(BLACK, 0, 1); // 電腦在上
+    setupSide(RED, 16, -1); // 人類在下
+    turn = RED;
+    document.getElementById('history').innerHTML = '';
+    render();
+}
+
+function setupSide(color, baseRow, dir) {
+    // 底線 (15枚) - 調整順序避免車直接對衝
+    const row0 = ['E','H','R','T','A','A','K','A','A','T','R','H','E'];
+    row0.forEach((t, i) => { board[baseRow][i+1] = { type:t, color }; });
+    
+    // 增加兩翼防禦
+    board[baseRow][0] = { type:'S', color };
+    board[baseRow][14] = { type:'S', color };
+
+    // 次底線
+    board[baseRow+dir][2] = { type:'R', color };
+    board[baseRow+dir][12] = { type:'R', color };
+    board[baseRow+dir][1] = { type:'H', color };
+    board[baseRow+dir][13] = { type:'H', color };
+
+    // 弩與砲
+    board[baseRow+dir*2][1] = { type:'X', color };
+    board[baseRow+dir*2][13] = { type:'X', color };
+    [3, 5, 9, 11].forEach(c => board[baseRow+dir*3][c] = { type:'P', color });
+
+    // 騎與諜
+    board[baseRow+dir*4][3] = { type:'C', color };
+    board[baseRow+dir*4][11] = { type:'C', color };
+    board[baseRow+dir*5][4] = { type:'D', color };
+    board[baseRow+dir*5][10] = { type:'D', color };
+
+    // 兵線 (11枚)
+    for(let i=0; i<11; i++) board[baseRow+dir*6][i+2] = { type:'S', color };
+}
+
+/** 移動邏輯 **/
+function getMoves(r, c, b = board) {
+    const p = b[r][c];
+    if (!p) return [];
+    let moves = [];
+    const isRed = p.color === RED;
+    const fwd = isRed ? -1 : 1;
+    const inB = (nr, nc) => nr>=0 && nr<ROWS && nc>=0 && nc<COLS;
+
+    switch(p.type) {
+        case 'K': // 5x5宮
+            const pr = isRed ? [12,16] : [0,4];
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc;
+                if(nr>=pr[0] && nr<=pr[1] && nc>=5 && nc<=9 && (!b[nr][nc] || b[nr][nc].color!==p.color)) moves.push({r:nr,c:nc});
+            });
+            break;
+        case 'A': // 5x5宮斜
+            const ar = isRed ? [12,16] : [0,4];
+            [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc;
+                if(nr>=ar[0] && nr<=ar[1] && nc>=5 && nc<=9 && (!b[nr][nc] || b[nr][nc].color!==p.color)) moves.push({r:nr,c:nc});
+            });
+            break;
+        case 'E': // 田字
+            [[2,2],[2,-2],[-2,2],[-2,-2]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc, mr=r+dr/2, mc=c+dc/2;
+                if(inB(nr,nc) && !b[mr][mc]) {
+                    if((isRed && nr>RIVER_ROW) || (!isRed && nr<RIVER_ROW)) {
+                        if(!b[nr][nc] || b[nr][nc].color!==p.color) moves.push({r:nr,c:nc});
+                    }
+                }
+            });
+            break;
+        case 'R': // 車
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc;
+                while(inB(nr,nc)){
+                    if(!b[nr][nc]) moves.push({r:nr,c:nc});
+                    else { if(b[nr][nc].color!==p.color) moves.push({r:nr,c:nc}); break; }
+                    nr+=dr; nc+=dc;
+                }
+            });
+            break;
+        case 'H': // 馬
+            [[1,2],[1,-2],[-1,2],[-1,-2],[2,1],[2,-1],[-2,1],[-2,-1]].forEach(([dr,dc])=>{
+                let lr = Math.abs(dr)===2?r+dr/2:r, lc = Math.abs(dc)===2?c+dc/2:c;
+                let nr=r+dr, nc=c+dc;
+                if(inB(nr,nc) && !b[lr][lc]) if(!b[nr][nc] || b[nr][nc].color!==p.color) moves.push({r:nr,c:nc});
+            });
+            break;
+        case 'P': // 砲
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc, j=false;
+                while(inB(nr,nc)){
+                    if(!j) { if(!b[nr][nc]) moves.push({r:nr,c:nc}); else j=true; }
+                    else { if(b[nr][nc]) { if(b[nr][nc].color!==p.color) moves.push({r:nr,c:nc}); break; } }
+                    nr+=dr; nc+=dc;
+                }
+            });
+            break;
+        case 'S': // 兵 (過河強化)
+            if(inB(r+fwd,c) && (!b[r+fwd][c] || b[r+fwd][c].color!==p.color)) moves.push({r:r+fwd,c});
+            if((isRed && r<=RIVER_ROW) || (!isRed && r>=RIVER_ROW)) {
+                [[0,1],[0,-1],[fwd,1],[fwd,-1]].forEach(([dr,dc])=>{
+                    if(inB(r+dr,c+dc) && (!b[r+dr][c+dc] || b[r+dr][c+dc].color!==p.color)) moves.push({r:r+dr,c:c+dc});
+                });
+            }
+            break;
+        case 'X': // 弩
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{
+                for(let s=1;s<=2;s++) if(inB(r+dr*s,c+dc*s) && !b[r+dr*s][c+dc*s]) moves.push({r:r+dr*s,c:c+dc*s}); else break;
+                let tr=r+dr*2, tc=c+dc*2, mr=r+dr, mc=c+dc;
+                if(inB(tr,tc) && b[mr][mc] && b[tr][tc] && b[tr][tc].color!==p.color) moves.push({r:tr,c:tc,type:'snipe'});
+            });
+            break;
+        case 'C': // 騎
+            [[3,1],[3,-1],[-3,1],[-3,-1],[1,3],[-1,3],[1,-3],[-1,-3]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc;
+                let l1r = Math.abs(dr)>Math.abs(dc)? r+Math.sign(dr) : r, l1c = Math.abs(dr)>Math.abs(dc)? c : c+Math.sign(dc);
+                let l2r = Math.abs(dr)>Math.abs(dc)? r+Math.sign(dr)*2 : r, l2c = Math.abs(dr)>Math.abs(dc)? c : c+Math.sign(dc)*2;
+                if(inB(nr,nc) && !b[l1r][l1c] && !b[l2r][l2c]) if(!b[nr][nc] || b[nr][nc].color!==p.color) moves.push({r:nr,c:nc});
+            });
+            break;
+        case 'D': // 諜
+            [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dr,dc])=>{
+                if(inB(r+dr,c+dc) && (!b[r+dr][c+dc] || b[r+dr][c+dc].color!==p.color)) moves.push({r:r+dr,c:c+dc});
+            });
+            if((isRed && r<=RIVER_ROW) || (!isRed && r>=RIVER_ROW)) {
+                [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{
+                    if(inB(r+dr,c+dc) && (!b[r+dr][c+dc] || b[r+dr][c+dc].color!==p.color)) moves.push({r:r+dr,c:c+dc});
+                });
+            }
+            break;
+        case 'T': // 投
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dr,dc])=>{ if(inB(r+dr,c+dc) && !b[r+dr][c+dc]) moves.push({r:r+dr,c:c+dc}); });
+            [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[-1,2],[1,-2],[-1,-2]].forEach(([dr,dc])=>{
+                let nr=r+dr, nc=c+dc, mr=Math.round(r+dr/2), mc=Math.round(c+dc/2);
+                if(inB(nr,nc) && b[mr][mc] && b[nr][nc] && b[nr][nc].color!==p.color) moves.push({r:nr,c:nc});
+            });
+            break;
+    }
+
+    // 潛行過濾
+    return moves.filter(m => {
+        let tar = b[m.r][m.c];
+        if(tar && tar.type === 'D') {
+            // 基礎攻擊檢查
+            const isRedSpy = tar.color === RED;
+            const sFwd = isRedSpy ? -1 : 1;
+            let canSee = false;
+            [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dr,dc])=>{ if(m.r+dr===r && m.c+dc===c) canSee=true; });
+            return canSee;
+        }
+        return true;
+    });
+}
+
+/** AI (Minimax + Alpha-Beta) **/
+function evaluate(b) {
+    let s = 0;
+    for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
+        let p = b[r][c];
+        if(p) s += (p.color===RED ? 1 : -1) * (PIECE_VALS[p.type] + (p.color===RED?(16-r):r)*5);
+    }
+    return s;
+}
+
+function minimax(b, depth, alpha, beta, isMax) {
+    if(depth===0) return evaluate(b);
+    let legals = [];
+    for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
+        if(b[r][c] && b[r][c].color===(isMax?RED:BLACK)) {
+            getMoves(r,c,b).forEach(m=>legals.push({fr:r,fc:c,tr:m.r,tc:m.c,t:m.type}));
+        }
+    }
+    if(isMax){
+        let v = -Infinity;
+        for(let m of legals){
+            let old = b[m.tr][m.tc]; let src = b[m.fr][m.fc];
+            if(m.t==='snipe') b[m.tr][m.tc]=null; else { b[m.tr][m.tc]=src; b[m.fr][m.fc]=null; }
+            v = Math.max(v, minimax(b, depth-1, alpha, beta, false));
+            if(m.t==='snipe') b[m.tr][m.tc]=old; else { b[m.fr][m.fc]=src; b[m.tr][m.tc]=old; }
+            alpha = Math.max(alpha, v); if(beta<=alpha) break;
+        }
+        return v;
+    } else {
+        let v = Infinity;
+        for(let m of legals){
+            let old = b[m.tr][m.tc]; let src = b[m.fr][m.fc];
+            if(m.t==='snipe') b[m.tr][m.tc]=null; else { b[m.tr][m.tc]=src; b[m.fr][m.fc]=null; }
+            v = Math.min(v, minimax(b, depth-1, alpha, beta, true));
+            if(m.t==='snipe') b[m.tr][m.tc]=old; else { b[m.fr][m.fc]=src; b[m.tr][m.tc]=old; }
+            beta = Math.min(beta, v); if(beta<=alpha) break;
+        }
+        return v;
+    }
+}
+
+function aiMove() {
+    isAiThinking = true;
+    setTimeout(() => {
+        let bestV = Infinity; let bestM = null;
+        let d = parseInt(document.getElementById('aiDepth').value);
+        let legals = [];
+        for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
+            if(board[r][c] && board[r][c].color===BLACK) {
+                getMoves(r,c,board).forEach(m=>legals.push({fr:r,fc:c,tr:m.r,tc:m.c,t:m.type}));
+            }
+        }
+        for(let m of legals) {
+            let old = board[m.tr][m.tc], src = board[m.fr][m.fc];
+            if(m.t==='snipe') board[m.tr][m.tc]=null; else { board[m.tr][m.tc]=src; board[m.fr][m.fc]=null; }
+            let v = minimax(board, d-1, -Infinity, Infinity, true);
+            if(m.t==='snipe') board[m.tr][m.tc]=old; else { board[m.fr][m.fc]=src; board[m.tr][m.tc]=old; }
+            if(v < bestV) { bestV = v; bestM = m; }
+        }
+        if(bestM) executeMove(bestM.fr, bestM.fc, bestM.tr, bestM.tc, bestM.t);
+        isAiThinking = false;
+    }, 200);
+}
+
+/** UI 與 操作 **/
+function render() {
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+    for(let r=0; r<ROWS; r++) {
+        for(let c=0; c<COLS; c++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell' + (r === RIVER_ROW ? ' river-cell' : '');
+            cell.onclick = () => handleCellClick(r,c);
+            if(r===RIVER_ROW && c===7) {
+                const t = document.createElement('div'); t.className='river-text'; t.innerText='楚 河 漢 界'; cell.appendChild(t);
+            }
+            const p = board[r][c];
+            if(p) {
+                const pEl = document.createElement('div');
+                pEl.className = `piece ${p.color} ${selectedSquare?.r===r && selectedSquare?.c===c?'selected':''}`;
+                pEl.innerText = PIECE_NAMES[p.color][p.type];
+                cell.appendChild(pEl);
+            }
+            const mv = validMoves.find(m => m.r===r && m.c===c);
+            if(mv) {
+                const h = document.createElement('div'); h.className='hint'+(mv.type==='snipe'?' snipe':''); cell.appendChild(h);
+            }
+            boardEl.appendChild(cell);
+        }
+    }
+}
+
+function handleCellClick(r, c) {
+    if(isAiThinking) return;
+    if(document.getElementById('gameMode').value==='PvE' && turn===BLACK) return;
+    const mv = validMoves.find(m => m.r===r && m.c===c);
+    if(mv) executeMove(selectedSquare.r, selectedSquare.c, r, c, mv.type);
+    else {
+        const p = board[r][c];
+        if(p && p.color === turn) { selectedSquare = {r,c}; validMoves = getMoves(r,c); }
+        else { selectedSquare = null; validMoves = []; }
+    }
+    render();
+}
+
+function executeMove(fr, fc, tr, tc, type) {
+    const p = board[fr][fc];
+    const log = document.getElementById('history');
+    const moveStr = `${PIECE_NAMES[p.color][p.type]}(${fr},${fc}) ${type==='snipe'?'狙擊':'至'} (${tr},${tc})`;
+    const entry = document.createElement('div');
+    entry.className = 'move-entry ' + (p.color===RED?'red-text':'black-text');
+    entry.innerText = (p.color===RED?'紅: ':'黑: ') + moveStr;
+    log.prepend(entry);
+
+    if(type === 'snipe') board[tr][tc] = null;
+    else {
+        if(board[tr][tc] && board[tr][tc].type === 'K') { alert((turn===RED?'紅方':'黑方')+" 獲勝！"); resetGame(); return; }
+        board[tr][tc] = p; board[fr][fc] = null;
+    }
+    
+    turn = turn === RED ? BLACK : RED;
+    selectedSquare = null; validMoves = [];
+    document.getElementById('status').innerText = `當前回合：${turn===RED?'紅方':'黑方'}`;
+    render();
+    if(document.getElementById('gameMode').value==='PvE' && turn===BLACK) aiMove();
+}
+
+function resetGame() {
+    initBoard();
+    if(document.getElementById('gameMode').value==='PvE' && turn===BLACK) aiMove();
+}
+
+initBoard();
+</script>
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>專業版象棋 - 支援 AI 難度調整</title>
+    <style>
+        :root {
+            --cell-size: 60px;
+            --board-width: calc(var(--cell-size) * 8);
+            --board-height: calc(var(--cell-size) * 9);
+            --line-color: #333;
+            --piece-red: #d32f2f;
+            --piece-black: #212121;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #2c3e50;
+            font-family: "Microsoft JhengHei", sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+            color: white;
+            text-align: center;
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        #status { font-size: 24px; margin-bottom: 10px; color: #ffeb3b; }
+
+        /* 棋盤主體 */
+        #game-container {
+            position: relative;
+            width: calc(var(--board-width) + 60px);
+            height: calc(var(--board-height) + 60px);
+            background-color: #e3c16f;
+            border: 5px solid #5d4037;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        /* 繪製棋盤線條 */
+        .board-lines {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            width: var(--board-width);
+            height: var(--board-height);
+            border: 1px solid var(--line-color);
+            pointer-events: none;
+        }
+
+        .grid-row {
+            position: absolute;
+            width: 100%;
+            height: 1px;
+            background: var(--line-color);
+        }
+
+        .grid-col {
+            position: absolute;
+            width: 1px;
+            height: 100%;
+            background: var(--line-color);
+        }
+
+        /* 楚河漢界 */
+        .river {
+            position: absolute;
+            top: calc(var(--cell-size) * 4);
+            width: 100%;
+            height: var(--cell-size);
+            background: #e3c16f;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            font-size: 30px;
+            font-weight: bold;
+            color: var(--line-color);
+        }
+
+        /* 九宮格斜線 */
+        .palace-cross {
+            position: absolute;
+            width: calc(var(--cell-size) * 2);
+            height: calc(var(--cell-size) * 2);
+            pointer-events: none;
+        }
+        .palace-cross::before, .palace-cross::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 50%;
+            width: 1px; height: 141.4%; /* sqrt(2) */
+            background: var(--line-color);
+            transform-origin: top;
+        }
+        .palace-cross::before { transform: translate(-50%, 0) rotate(45deg); left: 0; width: 141.4%; height: 1px; top:0; } /* 修正斜線 */
+        
+        /* 簡單畫九宮格 X */
+        .x-line {
+            position: absolute;
+            width: calc(var(--cell-size) * 2);
+            height: calc(var(--cell-size) * 2);
+            border: none;
+        }
+        .x-line svg { width: 100%; height: 100%; }
+
+        /* 棋子 */
+        .piece {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            position: absolute;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 10;
+            background: #f5f5f5;
+            border: 3px solid #333;
+            transform: translate(-50%, -50%);
+            transition: all 0.1s;
+            user-select: none;
+        }
+        .piece.red { color: var(--piece-red); border-color: var(--piece-red); }
+        .piece.black { color: var(--piece-black); border-color: var(--piece-black); }
+        .piece.selected { background: #ffeb3b; box-shadow: 0 0 15px #fff; z-index: 11; }
+
+        /* 點擊落點點位 (交叉點) */
+        .point {
+            width: 40px;
+            height: 40px;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        .point.hint::after {
+            content: "";
+            display: block;
+            width: 15px;
+            height: 15px;
+            background: rgba(46, 204, 113, 0.6);
+            border-radius: 50%;
+            margin: 12.5px;
+        }
+
+        button, select {
+            padding: 8px 15px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <div id="status">紅方先行</div>
+    模式: 
+    <select id="mode">
+        <option value="pve">電腦對戰</option>
+        <option value="pvp">雙人對戰</option>
+    </select>
+    AI 難度:
+    <select id="ai-depth">
+        <option value="1">新手 (深度 1)</option>
+        <option value="2" selected>普通 (深度 2)</option>
+        <option value="3">高手 (深度 3)</option>
+    </select>
+    <button onclick="resetGame()">重新開始</button>
+</div>
+
+<div id="game-container">
+    <!-- 棋盤背景線 -->
+    <div class="board-lines" id="board-grid"></div>
+    
+    <!-- 九宮格斜線 (SVG) -->
+    <div style="position:absolute; top:30px; left:210px; width:120px; height:120px; pointer-events:none;">
+        <svg width="120" height="120"><line x1="0" y1="0" x2="120" y2="120" stroke="#333" /><line x1="120" y1="0" x2="0" y2="120" stroke="#333" /></svg>
+    </div>
+    <div style="position:absolute; top:450px; left:210px; width:120px; height:120px; pointer-events:none;">
+        <svg width="120" height="120"><line x1="0" y1="0" x2="120" y2="120" stroke="#333" /><line x1="120" y1="0" x2="0" y2="120" stroke="#333" /></svg>
+    </div>
+
+    <!-- 點擊層與棋子層 -->
+    <div id="click-points"></div>
+    <div id="pieces-layer"></div>
+</div>
+
+<script>
+/**
+ * 象棋核心邏輯
+ */
+const PIECES_CONFIG = {
+    r_ju: { name: '俥', side: 'red', type: 'ju', value: 100 },
+    r_ma: { name: '傌', side: 'red', type: 'ma', value: 45 },
+    r_xiang: { name: '相', side: 'red', type: 'xiang', value: 20 },
+    r_shi: { name: '仕', side: 'red', type: 'shi', value: 20 },
+    r_shuai: { name: '帥', side: 'red', type: 'shuai', value: 10000 },
+    r_pao: { name: '炮', side: 'red', type: 'pao', value: 50 },
+    r_bing: { name: '兵', side: 'red', type: 'bing', value: 10 },
+    b_ju: { name: '車', side: 'black', type: 'ju', value: 100 },
+    b_ma: { name: '馬', side: 'black', type: 'ma', value: 45 },
+    b_xiang: { name: '象', side: 'black', type: 'xiang', value: 20 },
+    b_shi: { name: '士', side: 'black', type: 'shi', value: 20 },
+    b_jiang: { name: '將', side: 'black', type: 'jiang', value: 10000 },
+    b_pao: { name: '砲', side: 'black', type: 'pao', value: 50 },
+    b_zu: { name: '卒', side: 'black', type: 'zu', value: 100 } // 卒其實是 10 但 AI 判斷中可調整
+};
+
+let board = [];
+let turn = 'red';
+let selected = null;
+let gameOver = false;
+
+// 1. 初始化棋盤線條
+function drawGrid() {
+    const grid = document.getElementById('board-grid');
+    // 橫線
+    for(let i=0; i<10; i++) {
+        const line = document.createElement('div');
+        line.className = 'grid-row';
+        line.style.top = (i * 60) + 'px';
+        grid.appendChild(line);
+    }
+    // 直線
+    for(let i=0; i<9; i++) {
+        const line = document.createElement('div');
+        line.className = 'grid-col';
+        line.style.left = (i * 60) + 'px';
+        if (i > 0 && i < 8) {
+            // 直線在河界斷開
+            line.style.height = '240px';
+            const lineBottom = line.cloneNode();
+            lineBottom.style.top = '300px';
+            grid.appendChild(lineBottom);
+        }
+        grid.appendChild(line);
+    }
+    // 河界文字
+    const river = document.createElement('div');
+    river.className = 'river';
+    river.innerHTML = '<span>楚 河</span><span>漢 界</span>';
+    grid.appendChild(river);
+}
+
+// 2. 初始化棋盤狀態
+function initBoard() {
+    board = Array(10).fill(null).map(() => Array(9).fill(null));
+    const layout = [
+        ['b_ju','b_ma','b_xiang','b_shi','b_jiang','b_shi','b_xiang','b_ma','b_ju'],
+        [],
+        [null,'b_pao',null,null,null,null,null,'b_pao',null],
+        ['b_zu',null,'b_zu',null,'b_zu',null,'b_zu',null,'b_zu'],
+        [], [],
+        ['r_bing',null,'r_bing',null,'r_bing',null,'r_bing',null,'r_bing'],
+        [null,'r_pao',null,null,null,null,null,'r_pao',null],
+        [],
+        ['r_ju','r_ma','r_xiang','r_shi','r_shuai','r_shi','r_xiang','r_ma','r_ju']
+    ];
+    layout.forEach((row, r) => row.forEach((p, c) => { if(p) board[r][c] = p; }));
+}
+
+// 3. 渲染
+function render() {
+    const pLayer = document.getElementById('pieces-layer');
+    const cLayer = document.getElementById('click-points');
+    pLayer.innerHTML = '';
+    cLayer.innerHTML = '';
+
+    // 合法移動提示
+    const hints = selected ? getValidMoves(selected.r, selected.c, board) : [];
+
+    for(let r=0; r<10; r++) {
+        for(let c=0; c<9; c++) {
+            // 繪製棋子
+            const pKey = board[r][c];
+            if(pKey) {
+                const p = PIECES_CONFIG[pKey];
+                const div = document.createElement('div');
+                div.className = `piece ${p.side} ${selected && selected.r==r && selected.c==c ? 'selected' : ''}`;
+                div.style.left = (c * 60 + 30) + 'px';
+                div.style.top = (r * 60 + 30) + 'px';
+                div.innerText = p.name;
+                div.onclick = () => handleSquareClick(r, c);
+                pLayer.appendChild(div);
+            }
+
+            // 繪製隱形點點 (點擊偵測)
+            const pt = document.createElement('div');
+            pt.className = 'point' + (hints.some(h => h.r==r && h.c==c) ? ' hint' : '');
+            pt.style.left = (c * 60 + 30) + 'px';
+            pt.style.top = (r * 60 + 30) + 'px';
+            pt.onclick = () => handleSquareClick(r, c);
+            cLayer.appendChild(pt);
+        }
+    }
+}
+
+function handleSquareClick(r, c) {
+    if(gameOver) return;
+    const pKey = board[r][c];
+    
+    if (selected) {
+        const moves = getValidMoves(selected.r, selected.c, board);
+        const canMove = moves.some(m => m.r === r && m.c === c);
+        
+        if (canMove) {
+            executeMove(selected.r, selected.c, r, c);
+            selected = null;
+            if(!gameOver && turn === 'black' && document.getElementById('mode').value === 'pve') {
+                setTimeout(aiRoutine, 300);
+            }
+        } else if (pKey && PIECES_CONFIG[pKey].side === turn) {
+            selected = {r, c}; // 切換選取
+        } else {
+            selected = null; // 取消選取
+        }
+    } else {
+        if (pKey && PIECES_CONFIG[pKey].side === turn) {
+            selected = {r, c};
+        }
+    }
+    render();
+}
+
+function executeMove(fr, fc, tr, tc) {
+    const target = board[tr][tc];
+    if (target === 'b_jiang') win('紅方');
+    if (target === 'r_shuai') win('黑方');
+
+    board[tr][tc] = board[fr][fc];
+    board[fr][fc] = null;
+    turn = turn === 'red' ? 'black' : 'red';
+    document.getElementById('status').innerText = turn === 'red' ? "紅方回合" : "黑方回合";
+}
+
+function win(side) {
+    gameOver = true;
+    document.getElementById('status').innerText = side + " 獲勝！";
+    setTimeout(() => alert(side + " 獲勝！"), 100);
+}
+
+// 4. 規則引擎
+function getValidMoves(r, c, b) {
+    const pKey = b[r][c];
+    if(!pKey) return [];
+    const p = PIECES_CONFIG[pKey];
+    const moves = [];
+    
+    const isEnemy = (nr, nc) => b[nr][nc] && PIECES_CONFIG[b[nr][nc]].side !== p.side;
+    const isEmpty = (nr, nc) => !b[nr][nc];
+    const canGo = (nr, nc) => !((nr<0||nr>9||nc<0||nc>8)) && (isEmpty(nr, nc) || isEnemy(nr, nc));
+
+    switch(p.type) {
+        case 'ju':
+            [['u',-1,0],['d',1,0],['l',0,-1],['r',0,1]].forEach(d => {
+                for(let i=1; i<10; i++) {
+                    let nr = r+d[1]*i, nc = c+d[2]*i;
+                    if(nr<0||nr>9||nc<0||nc>8) break;
+                    if(isEmpty(nr, nc)) moves.push({r:nr, c:nc});
+                    else { if(isEnemy(nr, nc)) moves.push({r:nr, c:nc}); break; }
+                }
+            });
+            break;
+        case 'ma':
+            [[-2,-1],[-2,1],[2,-1],[2,1],[-1,-2],[1,-2],[-1,2],[1,2]].forEach((m, i) => {
+                let nr = r+m[0], nc = c+m[1];
+                let br = r + (Math.abs(m[0])==2 ? m[0]/2 : 0);
+                let bc = c + (Math.abs(m[1])==2 ? m[1]/2 : 0);
+                if(canGo(nr, nc) && !b[br][bc]) moves.push({r:nr, c:nc});
+            });
+            break;
+        case 'pao':
+            [['u',-1,0],['d',1,0],['l',0,-1],['r',0,1]].forEach(d => {
+                let platform = false;
+                for(let i=1; i<10; i++) {
+                    let nr = r+d[1]*i, nc = c+d[2]*i;
+                    if(nr<0||nr>9||nc<0||nc>8) break;
+                    if(!platform) {
+                        if(isEmpty(nr, nc)) moves.push({r:nr, c:nc});
+                        else platform = true;
+                    } else {
+                        if(!isEmpty(nr, nc)) {
+                            if(isEnemy(nr, nc)) moves.push({r:nr, c:nc});
+                            break;
+                        }
+                    }
+                }
+            });
+            break;
+        case 'xiang':
+            const xDirs = [[-2,-2],[-2,2],[2,-2],[2,2]];
+            xDirs.forEach(d => {
+                let nr = r+d[0], nc = c+d[1];
+                let er = r+d[0]/2, ec = c+d[1]/2;
+                if(canGo(nr, nc) && isEmpty(er, ec)) {
+                    if(p.side === 'red' && nr < 5) return;
+                    if(p.side === 'black' && nr > 4) return;
+                    moves.push({r:nr, c:nc});
+                }
+            });
+            break;
+        case 'shi':
+            [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(d => {
+                let nr = r+d[0], nc = c+d[1];
+                if(canGo(nr, nc) && nc>=3 && nc<=5 && (p.side==='red'?nr>=7:nr<=2)) moves.push({r:nr, c:nc});
+            });
+            break;
+        case 'jiang': case 'shuai':
+            [[-1,0],[1,0],[0,-1],[0,1]].forEach(d => {
+                let nr = r+d[0], nc = c+d[1];
+                if(canGo(nr, nc) && nc>=3 && nc<=5 && (p.side==='red'?nr>=7:nr<=2)) moves.push({r:nr, c:nc});
+            });
+            // 飛將
+            let dir = (p.side === 'red') ? -1 : 1;
+            for(let i=1; i<10; i++) {
+                let nr = r + i*dir;
+                if(nr<0||nr>9) break;
+                if(b[nr][c]) {
+                    if(PIECES_CONFIG[b[nr][c]].type === (p.side==='red'?'jiang':'shuai')) moves.push({r:nr, c:c});
+                    break;
+                }
+            }
+            break;
+        case 'bing': case 'zu':
+            let f = (p.side === 'red') ? -1 : 1;
+            if(canGo(r+f, c)) moves.push({r:r+f, c:c});
+            let crossed = (p.side === 'red' ? r <= 4 : r >= 5);
+            if(crossed) {
+                if(canGo(r, c-1)) moves.push({r, c:c-1});
+                if(canGo(r, c+1)) moves.push({r, c:c+1});
+            }
+            break;
+    }
+    return moves;
+}
+
+// 5. AI (Minimax)
+function aiRoutine() {
+    const depth = parseInt(document.getElementById('ai-depth').value);
+    const move = getBestMove(board, depth);
+    if(move) {
+        executeMove(move.fr, move.fc, move.tr, move.tc);
+        render();
+    }
+}
+
+function evaluate(b) {
+    let score = 0;
+    for(let r=0; r<10; r++) {
+        for(let c=0; c<9; c++) {
+            if(b[r][c]) {
+                const p = PIECES_CONFIG[b[r][c]];
+                score += (p.side === 'black' ? p.value : -p.value);
+            }
+        }
+    }
+    return score;
+}
+
+function getBestMove(b, depth) {
+    let bestScore = -Infinity;
+    let move = null;
+    const allMoves = [];
+
+    for(let r=0; r<10; r++) {
+        for(let c=0; c<9; c++) {
+            if(b[r][c] && PIECES_CONFIG[b[r][c]].side === 'black') {
+                getValidMoves(r, c, b).forEach(m => allMoves.push({fr:r, fc:c, tr:m.r, tc:m.c}));
+            }
+        }
+    }
+
+    allMoves.sort(() => Math.random() - 0.5); // 隨機化
+
+    for(let m of allMoves) {
+        let oldTarget = b[m.tr][m.tc];
+        b[m.tr][m.tc] = b[m.fr][m.fc];
+        b[m.fr][m.fc] = null;
+        
+        let score = minimax(b, depth - 1, -100000, 100000, false);
+        
+        b[m.fr][m.fc] = b[m.tr][m.tc];
+        b[m.tr][m.tc] = oldTarget;
+
+        if(score > bestScore) {
+            bestScore = score;
+            move = m;
+        }
+    }
+    return move;
+}
+
+function minimax(b, depth, alpha, beta, isMax) {
+    if(depth === 0) return evaluate(b);
+    
+    const side = isMax ? 'black' : 'red';
+    let best = isMax ? -100000 : 100000;
+
+    for(let r=0; r<10; r++) {
+        for(let c=0; c<9; c++) {
+            if(b[r][c] && PIECES_CONFIG[b[r][c]].side === side) {
+                const moves = getValidMoves(r, c, b);
+                for(let m of moves) {
+                    let old = b[m.r][m.c];
+                    b[m.r][m.c] = b[r][c]; b[r][c] = null;
+                    let val = minimax(b, depth-1, alpha, beta, !isMax);
+                    b[r][c] = b[m.r][m.c]; b[m.r][m.c] = old;
+                    
+                    if(isMax) {
+                        best = Math.max(best, val);
+                        alpha = Math.max(alpha, best);
+                    } else {
+                        best = Math.min(best, val);
+                        beta = Math.min(beta, best);
+                    }
+                    if(beta <= alpha) return best;
+                }
+            }
+        }
+    }
+    return best;
+}
+
+function resetGame() {
+    initBoard();
+    turn = 'red';
+    gameOver = false;
+    selected = null;
+    document.getElementById('status').innerText = "紅方先行";
+    render();
+}
+
+// 啟動
+drawGrid();
+initBoard();
+render();
+
+</script>
+</body>
+</html>

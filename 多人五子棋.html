@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>多人五子棋 (24x24)</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f0f0; }
+        canvas { background-color: #DEB887; box-shadow: 0 0 10px rgba(0,0,0,0.5); cursor: pointer; }
+        .controls { margin: 20px; padding: 15px; background: white; border-radius: 8px; }
+        .status { font-size: 24px; font-weight: bold; margin: 10px; height: 32px; }
+        .player-info { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; justify-content: center; }
+        .player-tag { padding: 5px 10px; border-radius: 4px; color: white; font-weight: bold; }
+        input { width: 40px; }
+    </style>
+</head>
+<body>
+
+    <h1>多人五子棋 (24x24)</h1>
+
+    <div class="controls">
+        人類數量: <input type="number" id="humanCount" value="2" min="0" max="6">
+        AI 數量: <input type="number" id="aiCount" value="0" min="0" max="6">
+        <button onclick="initGame()">重新開始遊戲</button>
+        <p style="font-size: 12px; color: #666;">總人數限制 2-6 人。AI 思考深度受限以保證流暢度。</p>
+    </div>
+
+    <div class="status" id="status">設定人數並開始</div>
+    <div class="player-info" id="playerInfo"></div>
+    <canvas id="board" width="720" height="720"></canvas>
+
+<script>
+/**
+ * 遊戲設定與變數
+ */
+const BOARD_SIZE = 36;
+const CELL_SIZE = 30;
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const statusDisplay = document.getElementById('status');
+const playerInfoDiv = document.getElementById('playerInfo');
+
+let board = [];
+let players = []; // { id, color, isAI }
+let currentPlayerIdx = 0;
+let gameOver = false;
+
+const COLORS = ["#000000", "#FFFFFF", "#FF0000", "#0000FF", "#008000", "#FFFF00"];
+const COLOR_NAMES = ["黑色", "白色", "紅色", "藍色", "綠色", "黃色"];
+
+/**
+ * 初始化遊戲
+ */
+function initGame() {
+    const hCount = parseInt(document.getElementById('humanCount').value);
+    const aCount = parseInt(document.getElementById('aiCount').value);
+    const total = hCount + aCount;
+
+    if (total < 2 || total > 6) {
+        alert("總人數必須在 2 到 6 人之間");
+        return;
+    }
+
+    // 初始化玩家
+    players = [];
+    for (let i = 0; i < hCount; i++) {
+        players.push({ id: i + 1, color: COLORS[i], name: COLOR_NAMES[i], isAI: false });
+    }
+    for (let i = 0; i < aCount; i++) {
+        const idx = hCount + i;
+        players.push({ id: idx + 1, color: COLORS[idx], name: COLOR_NAMES[idx] + "(AI)", isAI: true });
+    }
+
+    // 初始化棋盤
+    board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
+    currentPlayerIdx = 0;
+    gameOver = false;
+    
+    renderPlayerInfo();
+    drawBoard();
+    updateStatus();
+
+    if (players[currentPlayerIdx].isAI) {
+        setTimeout(aiMove, 500);
+    }
+}
+
+/**
+ * 繪製相關
+ */
+function drawBoard() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "#555";
+    
+    // 畫格子
+    for (let i = 0; i < BOARD_SIZE; i++) {
+        ctx.beginPath();
+        ctx.moveTo(CELL_SIZE/2 + i * CELL_SIZE, CELL_SIZE/2);
+        ctx.lineTo(CELL_SIZE/2 + i * CELL_SIZE, canvas.height - CELL_SIZE/2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(CELL_SIZE/2, CELL_SIZE/2 + i * CELL_SIZE);
+        ctx.lineTo(canvas.width - CELL_SIZE/2, CELL_SIZE/2 + i * CELL_SIZE);
+        ctx.stroke();
+    }
+
+    // 畫棋子
+    for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x] !== 0) {
+                const p = players.find(p => p.id === board[y][x]);
+                drawPiece(x, y, p.color);
+            }
+        }
+    }
+}
+
+function drawPiece(x, y, color) {
+    ctx.beginPath();
+    ctx.arc(CELL_SIZE/2 + x * CELL_SIZE, CELL_SIZE/2 + y * CELL_SIZE, CELL_SIZE/2 - 2, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = "#333";
+    ctx.stroke();
+}
+
+function renderPlayerInfo() {
+    playerInfoDiv.innerHTML = '';
+    players.forEach((p, idx) => {
+        const span = document.createElement('span');
+        span.className = 'player-tag';
+        span.style.backgroundColor = p.color;
+        span.style.border = (idx === currentPlayerIdx) ? "3px solid #333" : "1px solid transparent";
+        if (p.color === "#FFFF00" || p.color === "#FFFFFF") span.style.color = "#000";
+        span.innerText = p.name;
+        playerInfoDiv.appendChild(span);
+    });
+}
+
+function updateStatus() {
+    if (gameOver) return;
+    const p = players[currentPlayerIdx];
+    statusDisplay.innerText = `輪到：${p.name}`;
+    statusDisplay.style.color = p.color === "#FFFFFF" ? "#000" : p.color;
+}
+
+/**
+ * 遊戲邏輯
+ */
+canvas.addEventListener('mousedown', (e) => {
+    if (gameOver || players[currentPlayerIdx].isAI) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
+    const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+
+    if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE && board[y][x] === 0) {
+        makeMove(x, y);
+    }
+});
+
+function makeMove(x, y) {
+    const player = players[currentPlayerIdx];
+    board[y][x] = player.id;
+    drawBoard();
+
+    if (checkWin(x, y, player.id)) {
+        statusDisplay.innerText = `恭喜！${player.name} 獲勝！`;
+        gameOver = true;
+        return;
+    }
+
+    if (board.every(row => row.every(cell => cell !== 0))) {
+        statusDisplay.innerText = "平手！";
+        gameOver = true;
+        return;
+    }
+
+    currentPlayerIdx = (currentPlayerIdx + 1) % players.length;
+    renderPlayerInfo();
+    updateStatus();
+
+    if (players[currentPlayerIdx].isAI && !gameOver) {
+        setTimeout(aiMove, 300);
+    }
+}
+
+function checkWin(x, y, id) {
+    const directions = [[1,0], [0,1], [1,1], [1,-1]];
+    for (let [dx, dy] of directions) {
+        let count = 1;
+        // 正向
+        let tx = x + dx, ty = y + dy;
+        while(tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE && board[ty][tx] === id) {
+            count++; tx += dx; ty += dy;
+        }
+        // 反向
+        tx = x - dx; ty = y - dy;
+        while(tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE && board[ty][tx] === id) {
+            count++; tx -= dx; ty -= dy;
+        }
+        if (count >= 5) return true;
+    }
+    return false;
+}
+
+/**
+ * AI 邏輯 (Minimax 簡化版)
+ * 由於多人對弈且棋盤極大，標準 Minimax 搜尋過慢。
+ * 這裡採用啟發式評分法 (Heuristic Evaluation)，計算每個位置的權重。
+ */
+function aiMove() {
+    let bestScore = -Infinity;
+    let bestMoves = [];
+
+    // 縮小搜尋範圍以提升速度：只考慮已有棋子周圍 2 格的空位
+    let candidates = getCandidates();
+
+    for (let move of candidates) {
+        let score = evaluateMove(move.x, move.y, players[currentPlayerIdx].id);
+        if (score > bestScore) {
+            bestScore = score;
+            bestMoves = [move];
+        } else if (score === bestScore) {
+            bestMoves.push(move);
+        }
+    }
+
+    const finalMove = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    makeMove(finalMove.x, finalMove.y);
+}
+
+function getCandidates() {
+    let list = [];
+    let hasPiece = false;
+    for (let y = 0; y < BOARD_SIZE; y++) {
+        for (let x = 0; x < BOARD_SIZE; x++) {
+            if (board[y][x] !== 0) {
+                hasPiece = true;
+                // 檢查周圍
+                for (let dy = -2; dy <= 2; dy++) {
+                    for (let dx = -2; dx <= 2; dx++) {
+                        let ny = y + dy, nx = x + dx;
+                        if (ny >= 0 && ny < BOARD_SIZE && nx >= 0 && nx < BOARD_SIZE && board[ny][nx] === 0) {
+                            if (!list.some(m => m.x === nx && m.y === ny)) {
+                                list.push({x: nx, y: ny});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!hasPiece) return [{x: 12, y: 12}];
+    return list;
+}
+
+// 評估函數：判斷在 (x, y) 下子對該玩家的價值
+function evaluateMove(x, y, playerId) {
+    let totalScore = 0;
+
+    // 1. 進攻評分：看這一步能為自己連成什麼樣
+    totalScore += getScoreInDirections(x, y, playerId) * 1.1;
+
+    // 2. 防禦評分：看這一步能阻斷對手最強的威脅
+    let maxEnemyThreat = 0;
+    for (let p of players) {
+        if (p.id === playerId) continue;
+        let enemyScore = getScoreInDirections(x, y, p.id);
+        if (enemyScore > maxEnemyThreat) maxEnemyThreat = enemyScore;
+    }
+    totalScore += maxEnemyThreat;
+
+    return totalScore;
+}
+
+function getScoreInDirections(x, y, id) {
+    const directions = [[1,0], [0,1], [1,1], [1,-1]];
+    let score = 0;
+
+    for (let [dx, dy] of directions) {
+        let count = 1;
+        let blocked = 0;
+
+        // 正向
+        let tx = x + dx, ty = y + dy;
+        if (tx < 0 || tx >= BOARD_SIZE || ty < 0 || ty >= BOARD_SIZE || (board[ty][tx] !== 0 && board[ty][tx] !== id)) {
+            blocked++;
+        } else {
+            while(tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE && board[ty][tx] === id) {
+                count++; tx += dx; ty += dy;
+            }
+            if (tx < 0 || tx >= BOARD_SIZE || ty < 0 || ty >= BOARD_SIZE || board[ty][tx] !== 0) blocked++;
+        }
+
+        // 反向
+        tx = x - dx; ty = y - dy;
+        if (tx < 0 || tx >= BOARD_SIZE || ty < 0 || ty >= BOARD_SIZE || (board[ty][tx] !== 0 && board[ty][tx] !== id)) {
+            blocked++;
+        } else {
+            while(tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE && board[ty][tx] === id) {
+                count++; tx -= dx; ty -= dy;
+            }
+            if (tx < 0 || tx >= BOARD_SIZE || ty < 0 || ty >= BOARD_SIZE || board[ty][tx] !== 0) blocked++;
+        }
+
+        score += calculatePatternScore(count, blocked);
+    }
+    return score;
+}
+
+function calculatePatternScore(count, blocked) {
+    if (count >= 5) return 100000;
+    if (blocked === 2) return 0;
+    if (count === 4) return blocked === 0 ? 10000 : 500;
+    if (count === 3) return blocked === 0 ? 500 : 50;
+    if (count === 2) return blocked === 0 ? 50 : 5;
+    return count;
+}
+
+// 啟動
+initGame();
+</script>
+</body>
+</html>

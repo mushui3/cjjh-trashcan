@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>瀾滄巨陣：古代陣法對決系統</title>
+    <style>
+        :root { --bg: #1e1e1e; --side: #252526; --btn: #3e3e42; --accent: #007acc; }
+        body { background: var(--bg); color: #ccc; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; display: flex; margin: 0; height: 100vh; overflow: hidden; }
+        
+        /* 側邊欄佈局 */
+        #sidebar { width: 350px; background: var(--side); display: flex; flex-direction: column; border-left: 1px solid #333; padding: 15px; box-sizing: border-box; }
+        #board-area { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #111; position: relative; }
+
+        canvas { background: #d2b48c; box-shadow: 0 0 50px rgba(0,0,0,0.5); border: 2px solid #555; }
+
+        .panel-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #fff; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        
+        /* 戰報滾動區 */
+        #log-container { flex: 1; background: #000; border-radius: 4px; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; margin-bottom: 15px; display: flex; flex-direction: column-reverse; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 2px; }
+        .log-red { color: #ff6b6b; }
+        .log-black { color: #4dabf7; }
+        .log-time { color: #666; font-size: 10px; }
+
+        /* 按鈕組 */
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+        button { background: var(--btn); color: white; border: 1px solid #555; padding: 8px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+        button:hover { background: var(--accent); }
+        button.primary { background: #c0392b; border: none; }
+        
+        /* 隱藏的文件輸入 */
+        #fileInput { display: none; }
+
+        #legend { font-size: 11px; max-height: 150px; overflow-y: auto; color: #aaa; }
+    </style>
+</head>
+<body>
+
+<div id="board-area">
+    <canvas id="gameBoard"></canvas>
+</div>
+
+<div id="sidebar">
+    <div id="status" style="font-size: 20px; text-align: center; margin-bottom: 15px; color: #f1c40f;">紅方回合</div>
+    
+    <div class="panel-title">戰略控制</div>
+    <div class="btn-group">
+        <button onclick="initNewGame('HH')">雙人對陣</button>
+        <button onclick="initNewGame('HA')">人機對陣</button>
+        <button onclick="exportGame()">匯出戰局</button>
+        <button onclick="document.getElementById('fileInput').click()">匯入戰局</button>
+        <button class="primary" style="grid-column: span 2;" onclick="resetCurrent()">重新開始</button>
+    </div>
+    <input type="file" id="fileInput" accept=".json" onchange="importGame(event)">
+
+    <div class="panel-title">戰報 (最新置頂)</div>
+    <div id="log-container"></div>
+
+    <div class="panel-title">兵種簡介</div>
+    <div id="legend"></div>
+</div>
+
+<script>
+const COLS = 32, ROWS = 33, CELL = 25;
+const RED = 'RED', BLACK = 'BLACK';
+const canvas = document.getElementById('gameBoard');
+const ctx = canvas.getContext('2d');
+canvas.width = COLS * CELL;
+canvas.height = ROWS * CELL;
+
+let board = [];
+let turn = RED;
+let selected = null;
+let gameMode = 'HH';
+let gameOver = false;
+let tips = [];
+
+const PIECE_TYPES = {
+    '帥': { val: 1000, color: RED }, '將': { val: 1000, color: BLACK },
+    '仕': { val: 30, color: RED }, '士': { val: 30, color: BLACK },
+    '相': { val: 30, color: RED }, '象': { val: 30, color: BLACK },
+    '車': { val: 100 }, '俥': { val: 100 },
+    '馬': { val: 50 }, '傌': { val: 50 },
+    '炮': { val: 60 }, '砲': { val: 60 },
+    '兵': { val: 15 }, '卒': { val: 15 },
+    '蛟': { val: 80, desc: '水域限定，直線無限' },
+    '樓': { val: 70, desc: '兩棲，水中如車' },
+    '鬼': { val: 40, desc: '水中刺客，八方一步' },
+    '驍': { val: 65, desc: '走目字，衝鋒' },
+    '弩': { val: 60, desc: '直走，吃三格處' },
+    '投': { val: 75, desc: '跳二吃一' },
+    '甲': { val: 55, desc: '重裝，擋炮跳' },
+    '刺': { val: 60, desc: '斜行無限' },
+    '工': { val: 35, desc: '工兵輔助' },
+    '醫': { val: 45, desc: '醫療單位' },
+    '謀': { val: 95, desc: '換位奇門' },
+    '戰': { val: 70, desc: '重裝戰象' }
+};
+
+function isWater(r, c) {
+    if (r === 16) return true;
+    return (r >= 8 && r <= 15 && (c >= 4 && c <= 11 || c >= 20 && c <= 27)) ||
+           (r >= 17 && r <= 24 && (c >= 4 && c <= 11 || c >= 20 && c <= 27));
+}
+
+// 陣法佈置系統
+function setupFormations() {
+    board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    
+    // 黑方：魚鱗陣 (密集三角)
+    const blackPieces = getPieceList(BLACK);
+    const blackWater = blackPieces.filter(p => "蛟樓鬼".includes(p));
+    const blackLand = blackPieces.filter(p => !"蛟樓鬼".includes(p));
+    
+    let li = 0, wi = 0;
+    // 布置水軍於黑方水域
+    for(let r=8; r<16; r++) for(let c=0; c<COLS; c++) if(isWater(r,c) && wi<blackWater.length) board[r][c]={type:blackWater[wi++], color:BLACK};
+    
+    // 魚鱗佈局 (三角形)
+    for(let dr=0; dr<12; dr++) {
+        let r = dr;
+        let width = dr; // 寬度隨行數增加
+        for(let offset = -width; offset <= width; offset++) {
+            let c = 15 + offset;
+            if(c>=0 && c<COLS && !board[r][c] && !isWater(r,c) && li<blackLand.length) {
+                board[r][c] = {type: blackLand[li++], color:BLACK};
+            }
+        }
+    }
+
+    // 紅方：鶴翼陣 (兩翼展開)
+    const redPieces = getPieceList(RED);
+    const redWater = redPieces.filter(p => "蛟樓鬼".includes(p));
+    const redLand = redPieces.filter(p => !"蛟樓鬼".includes(p));
+
+    li = 0, wi = 0;
+    // 布置水軍於紅方水域
+    for(let r=17; r<25; r++) for(let c=0; c<COLS; c++) if(isWater(r,c) && wi<redWater.length) board[r][c]={type:redWater[wi++], color:RED};
+
+    // 鶴翼佈局 (帥在後，兵在前，兩翼向前突)
+    for(let dr=0; dr<15; dr++) {
+        let r = 32 - dr;
+        let gap = Math.max(0, 10 - dr); // 中間留白隨前進縮小
+        for(let offset = gap; offset < gap + 10; offset++) {
+            let cols = [15-offset, 15+offset];
+            for(let c of cols) {
+                if(c>=0 && c<COLS && !board[r][c] && !isWater(r,c) && li<redLand.length) {
+                    board[r][c] = {type: redLand[li++], color:RED};
+                }
+            }
+        }
+    }
+}
+
+function getPieceList(color) {
+    const list = [];
+    const counts = { '帥':1, '仕':8, '相':10, '車':12, '馬':15, '炮':16, '兵':30, '蛟':4, '樓':6, '鬼':6, '驍':6, '弩':6, '投':4, '甲':6, '刺':4, '工':4, '醫':2, '謀':2, '戰':8 };
+    const maps = color === RED ? {} : {'帥':'將','仕':'士','相':'象','車':'俥','馬':'傌','炮':'砲','兵':'卒'};
+    Object.keys(counts).forEach(k => {
+        let type = maps[k] || k;
+        for(let i=0; i<counts[k]; i++) list.push(type);
+    });
+    return list;
+}
+
+// 基礎功能
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let r=0; r<ROWS; r++) {
+        for(let c=0; c<COLS; c++) {
+            let x=c*CELL, y=r*CELL;
+            if(r===16) ctx.fillStyle='#2980b9';
+            else if(isWater(r,c)) ctx.fillStyle='#3498db';
+            else ctx.fillStyle=(r+c)%2===0 ? '#d2b48c' : '#c4a47c';
+            ctx.fillRect(x,y,CELL,CELL);
+            ctx.strokeStyle='rgba(0,0,0,0.05)';
+            ctx.strokeRect(x,y,CELL,CELL);
+        }
+    }
+    // 繪製棋子
+    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='bold 14px sans-serif';
+    for(let r=0; r<ROWS; r++) {
+        for(let c=0; c<COLS; c++) {
+            const p = board[r][c];
+            if(!p) continue;
+            let x=c*CELL+CELL/2, y=r*CELL+CELL/2;
+            ctx.beginPath(); ctx.arc(x,y,10,0,7);
+            ctx.fillStyle=p.color===RED?'#c0392b':'#fff';
+            ctx.fill();
+            ctx.strokeStyle=p.color===RED?'#fff':'#333';
+            ctx.stroke();
+            ctx.fillStyle=p.color===RED?'#fff':'#000';
+            ctx.fillText(p.type[0],x,y);
+            if(selected && selected.r===r && selected.c===c) { ctx.strokeStyle='#f1c40f'; ctx.lineWidth=3; ctx.strokeRect(x-12,y-12,24,24); }
+        }
+    }
+    tips.forEach(t=>{ ctx.fillStyle='rgba(46,204,113,0.5)'; ctx.beginPath(); ctx.arc(t.c*CELL+CELL/2,t.r*CELL+CELL/2,4,0,7); ctx.fill(); });
+}
+
+function addLog(msg, color) {
+    const container = document.getElementById('log-container');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${color===RED?'log-red':'log-black'}`;
+    const time = new Date().toLocaleTimeString('zh-TW', {hour12:false});
+    entry.innerHTML = `<span class="log-time">[${time}]</span> ${msg}`;
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+}
+
+// 存檔與讀檔
+function exportGame() {
+    const data = JSON.stringify({ board, turn, gameMode, log: document.getElementById('log-container').innerHTML });
+    const blob = new Blob([data], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `chess_save_${Date.now()}.json`;
+    a.click();
+}
+
+function importGame(event) {
+    const file = event.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const data = JSON.parse(e.target.result);
+        board = data.board; turn = data.turn; gameMode = data.gameMode;
+        document.getElementById('log-container').innerHTML = data.log;
+        draw();
+    };
+    reader.readAsText(file);
+}
+
+// 遊戲邏輯與交互
+canvas.addEventListener('mousedown', e => {
+    if(gameOver || (gameMode==='HA' && turn===BLACK)) return;
+    const rect = canvas.getBoundingClientRect();
+    const c = Math.floor((e.clientX - rect.left)/CELL), r = Math.floor((e.clientY - rect.top)/CELL);
+    if(selected) {
+        if(isValidMove(selected.r, selected.c, r, c)) { executeMove(selected.r, selected.c, r, c); }
+        else { selected = board[r][c] && board[r][c].color===turn ? {r,c} : null; updateTips(); }
+    } else if(board[r][c] && board[r][c].color===turn) { selected = {r,c}; updateTips(); }
+    draw();
+});
+
+function isValidMove(fr,fc,tr,tc) {
+    const p = board[fr][fc]; const target = board[tr][tc];
+    if(target && target.color===p.color) return false;
+    const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
+    // 基礎邏輯(簡化)
+    if("車俥".includes(p.type)) return (fr===tr || fc===tc) && isPathClear(fr,fc,tr,tc);
+    if("兵卒".includes(p.type)) return dr+dc===1;
+    return dr<=1 && dc<=1;
+}
+
+function isPathClear(fr,fc,tr,tc) {
+    let rStep=Math.sign(tr-fr), cStep=Math.sign(tc-fc);
+    let currR=fr+rStep, currC=fc+cStep;
+    while(currR!==tr || currC!==tc) { if(board[currR][currC]) return false; currR+=rStep; currC+=cStep; }
+    return true;
+}
+
+function executeMove(fr,fc,tr,tc) {
+    const p = board[fr][fc];
+    addLog(`${p.color==='RED'?'紅':'黑'}${p.type}:(${fc},${fr})→(${tc},${tr})`, p.color);
+    if(board[tr][tc] && "帥將".includes(board[tr][tc].type)) { alert(p.color+" 勝利！"); gameOver=true; }
+    board[tr][tc]=p; board[fr][fc]=null; selected=null; tips=[];
+    turn = turn===RED?BLACK:RED;
+    document.getElementById('status').innerText = turn===RED?'紅方回合':'黑方回合';
+    if(!gameOver && gameMode==='HA' && turn===BLACK) setTimeout(aiMove, 500);
+    draw();
+}
+
+function aiMove() {
+    let moves = [];
+    for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
+        if(board[r][c] && board[r][c].color===BLACK) {
+            for(let tr=r-2; tr<=r+2; tr++) for(let tc=c-2; tc<=c+2; tc++) {
+                if(tr>=0 && tr<ROWS && tc>=0 && tc<COLS && isValidMove(r,c,tr,tc)) moves.push({fr:r,fc:c,tr,tc,score: board[tr][tc]?10:0});
+            }
+        }
+    }
+    if(moves.length>0) { let m=moves.sort((a,b)=>b.score-a.score)[0]; executeMove(m.fr,m.fc,m.tr,m.tc); }
+}
+
+function updateTips() { tips=[]; if(!selected) return; for(let r=selected.r-5;r<=selected.r+5;r++) for(let c=selected.c-5;c<=selected.c+5;c++) if(r>=0&&r<ROWS&&c>=0&&c<COLS&&isValidMove(selected.r,selected.c,r,c)) tips.push({r,c}); }
+
+function initNewGame(m) { gameMode=m; resetCurrent(); }
+function resetCurrent() { gameOver=false; turn=RED; selected=null; tips=[]; document.getElementById('log-container').innerHTML=''; setupFormations(); draw(); }
+
+// 說明
+const leg = document.getElementById('legend');
+Object.keys(PIECE_TYPES).forEach(k => { if(PIECE_TYPES[k].desc) leg.innerHTML += `<div><b>${k}</b>: ${PIECE_TYPES[k].desc}</div>`; });
+
+resetCurrent();
+</script>
+</body>
+</html>

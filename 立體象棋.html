@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>3D 立體暗棋 - 炮邏輯修正版</title>
+    <style>
+        :root {
+            --bg: #1a1a1a; --panel: #2c3e50; --accent: #f1c40f;
+            --red: #e74c3c; --black: #3498db; --cell: #d2b48c;
+        }
+        body { background: var(--bg); color: white; font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        .sidebar { width: 300px; background: var(--panel); padding: 20px; display: flex; flex-direction: column; border-right: 2px solid #444; }
+        .history-log { flex-grow: 1; background: #121212; margin-top: 15px; padding: 10px; overflow-y: auto; font-size: 0.85rem; border: 1px solid #444; border-radius: 5px; }
+        .main-game { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+        .status-bar { margin-bottom: 20px; background: #333; padding: 10px 20px; border-radius: 20px; display: flex; align-items: center; gap: 15px; }
+        .boards-container { display: grid; grid-template-columns: repeat(2, auto); gap: 30px; }
+        .board-wrap { text-align: center; }
+        .board { display: grid; grid-template-columns: repeat(4, 55px); grid-template-rows: repeat(4, 55px); background: var(--cell); border: 4px solid #8b4513; gap: 1px; }
+        .cell { width: 55px; height: 55px; border: 1px solid rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center; cursor: pointer; }
+        .cell.selected-cell { background: rgba(241, 196, 15, 0.4); }
+        .cell.combo-active { background: rgba(46, 204, 113, 0.3); outline: 2px solid #2ecc71; }
+        .piece { width: 45px; height: 45px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; user-select: none; transition: transform 0.2s; box-shadow: 0 3px 5px rgba(0,0,0,0.5); }
+        .piece.hidden { background: #95a5a6; color: transparent; border: 2px solid #7f8c8d; }
+        .piece.red { background: #fff; color: var(--red); border: 2px solid var(--red); }
+        .piece.black { background: #333; color: var(--black); border: 2px solid var(--black); }
+        .piece.selected { transform: scale(1.15); border: 3px solid var(--accent); }
+        .log-red { color: var(--red); } .log-black { color: var(--black); }
+        button { padding: 8px 15px; cursor: pointer; background: var(--accent); border: none; font-weight: bold; border-radius: 5px; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        .restart-btn { position: absolute; bottom: 20px; right: 20px; background: #e67e22; color: white; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>4x4x4 立體暗棋</h2>
+    <div>模式：<select id="modeSelect"><option value="PvC">人機對戰</option><option value="PvP">雙人對戰</option></select></div>
+    <div class="history-log" id="history"></div>
+</div>
+
+<div class="main-game">
+    <div class="status-bar">
+        <span id="turnInfo">輪到：紅方</span>
+        <button id="endComboBtn" style="display:none;" onclick="forceEndTurn()">結束連擊</button>
+    </div>
+    <div class="boards-container" id="container"></div>
+    <button class="restart-btn" onclick="initGame()">重新開始</button>
+</div>
+
+<script>
+    const PIECES_CONFIG = {
+        K: { name: ['帥', '將'], power: 7 },
+        A: { name: ['仕', '士'], power: 6 },
+        E: { name: ['相', '象'], power: 5 },
+        R: { name: ['俥', '車'], power: 4 },
+        H: { name: ['傌', '馬'], power: 3 },
+        C: { name: ['炮', '砲'], power: 2 },
+        P: { name: ['兵', '卒'], power: 1 }
+    };
+
+    let board = []; 
+    let currentPlayer = 'red';
+    let selected = null; 
+    let comboPiece = null;
+    let isGameOver = false;
+    let isAiThinking = false;
+
+    function initGame() {
+        board = []; currentPlayer = 'red'; selected = null; comboPiece = null; isGameOver = false; isAiThinking = false;
+        document.getElementById('history').innerHTML = '';
+        document.getElementById('endComboBtn').style.display = 'none';
+
+        let pool = [];
+        ['red', 'black'].forEach(color => {
+            for(let i=0; i<2; i++) {
+                pool.push({type:'K', color}, {type:'A', color}, {type:'A', color}, {type:'E', color}, {type:'E', color},
+                          {type:'R', color}, {type:'R', color}, {type:'H', color}, {type:'H', color}, {type:'C', color}, {type:'C', color},
+                          {type:'P', color}, {type:'P', color}, {type:'P', color}, {type:'P', color}, {type:'P', color});
+            }
+        });
+        pool.sort(() => Math.random() - 0.5);
+
+        let idx = 0;
+        for(let z=0; z<4; z++) {
+            board[z] = [];
+            for(let y=0; y<4; y++) {
+                board[z][y] = [];
+                for(let x=0; x<4; x++) board[z][y][x] = { ...pool[idx++], revealed: false };
+            }
+        }
+        render();
+    }
+
+    function render() {
+        const container = document.getElementById('container');
+        container.innerHTML = '';
+        for(let z=0; z<4; z++) {
+            const wrap = document.createElement('div');
+            wrap.className = 'board-wrap';
+            wrap.innerHTML = `<div style="color:gold; font-weight:bold;">L${z+1}</div>`;
+            const bEl = document.createElement('div');
+            bEl.className = 'board';
+            for(let y=0; y<4; y++) {
+                for(let x=0; x<4; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    if(selected && selected.z===z && selected.y===y && selected.x===x) cell.classList.add('selected-cell');
+                    if(comboPiece && comboPiece.z===z && comboPiece.y===y && comboPiece.x===x) cell.classList.add('combo-active');
+                    
+                    const p = board[z][y][x];
+                    if(p) {
+                        const pEl = document.createElement('div');
+                        pEl.className = `piece ${p.revealed ? p.color : 'hidden'}`;
+                        if(p.revealed) pEl.innerText = PIECES_CONFIG[p.type].name[p.color==='red'?0:1];
+                        if(selected && selected.z===z && selected.y===y && selected.x===x) pEl.classList.add('selected');
+                        cell.appendChild(pEl);
+                    }
+                    cell.onclick = () => handleCellClick(z, y, x);
+                    bEl.appendChild(cell);
+                }
+            }
+            wrap.appendChild(bEl);
+            container.appendChild(wrap);
+        }
+        document.getElementById('turnInfo').innerText = `輪到：${currentPlayer === 'red' ? '紅方' : '黑方'}`;
+        document.getElementById('turnInfo').style.color = currentPlayer==='red'?'#e74c3c':'#3498db';
+    }
+
+    function handleCellClick(z, y, x) {
+        if(isGameOver || isAiThinking) return;
+        const clicked = board[z][y][x];
+
+        if (selected) {
+            if (board[selected.z][selected.y][selected.x].color !== currentPlayer) {
+                selected = null; render(); return;
+            }
+            const moveRes = checkMove(selected, {z, y, x});
+            if (moveRes.can) {
+                executeMove(selected, {z, y, x}, moveRes.invincible);
+                return;
+            } else if (comboPiece) return;
+        }
+
+        if (!comboPiece && clicked && clicked.revealed && clicked.color === currentPlayer) {
+            selected = {z, y, x}; render(); return;
+        }
+
+        if (!comboPiece && clicked && !clicked.revealed) {
+            clicked.revealed = true;
+            addLog(currentPlayer, `翻開了棋子`);
+            switchTurn(); return;
+        }
+
+        if (!comboPiece) { selected = null; render(); }
+    }
+
+    function checkMove(from, to) {
+        const p = board[from.z][from.y][from.x];
+        const target = board[to.z][to.y][to.x];
+        if(!p) return {can:false};
+        if(from.z===to.z && from.y===to.y && from.x===to.x) return {can:false};
+        if(target && target.revealed && target.color === p.color) return {can:false};
+
+        const dx = Math.abs(to.x-from.x), dy = Math.abs(to.y-from.y), dz = Math.abs(to.z-from.z);
+
+        // 炮 (Cannon) 邏輯修正
+        if(p.type === 'C') {
+            let axes = (dx!==0?1:0)+(dy!==0?1:0)+(dz!==0?1:0);
+            if(axes === 1) { // 直線
+                const step = Math.max(dx, dy, dz);
+                const sx=Math.sign(to.x-from.x), sy=Math.sign(to.y-from.y), sz=Math.sign(to.z-from.z);
+                let obs = 0;
+                for(let i=1; i<step; i++) {
+                    if(board[from.z+sz*i][from.y+sy*i][from.x+sx*i]) obs++;
+                }
+                if(!target) {
+                    return {can: (obs === 0), invincible: false}; // 移動到空格中間不能有障礙
+                } else {
+                    // 吃子：中間必須恰好有一個障礙（炮台）
+                    // 若 obs 為 0 (鄰近或直線無遮擋)，不能吃
+                    return {can: (obs === 1), invincible: true};
+                }
+            }
+            return {can:false};
+        }
+
+        // 跨層判斷 (其他子)
+        if(dz !== 0) {
+            if(p.type !== 'H') { // 除了馬、炮(炮邏輯在上面) 之外，其餘子不能跨層吃
+                if(target) return {can:false};
+                if(dz===1 && dx===0 && dy===0) return {can:true, invincible:false};
+                return {can:false};
+            }
+        }
+
+        if(p.type === 'R') {
+            if(dz===0 && (dx===0 || dy===0)) {
+                const dist = Math.max(dx, dy);
+                const sx = Math.sign(to.x-from.x), sy = Math.sign(to.y-from.y);
+                let obs = 0;
+                for(let i=1; i<dist; i++) if(board[from.z][from.y+sy*i][from.x+sx*i]) obs++;
+                if(obs === 0) return {can:true, invincible: (dist > 1)};
+            }
+        } else if(p.type === 'H') {
+            const isDiag = (dx<=1 && dy<=1 && dz<=1 && (dx+dy+dz>=2));
+            if(isDiag) return {can:true, invincible:true};
+            if(dx+dy+dz===1) return {can:true, invincible:false};
+        } else if(dx+dy+dz === 1) {
+            return {can:true, invincible:false};
+        }
+        return {can:false};
+    }
+
+    function executeMove(from, to, invincible) {
+        const p = board[from.z][from.y][from.x];
+        const target = board[to.z][to.y][to.x];
+
+        if (target && !target.revealed) {
+            target.revealed = true;
+            if (target.color === p.color) {
+                addLog(currentPlayer, `誤擊友軍！攻擊失敗。`);
+                switchTurn(); return 'friendly_fail';
+            }
+        }
+
+        if (target && !invincible) {
+            if (!checkPower(p, target)) {
+                addLog(currentPlayer, `等級不足！攻擊無效。`);
+                switchTurn(); return 'power_fail';
+            }
+        }
+
+        if(target) addLog(currentPlayer, `${PIECES_CONFIG[p.type].name[p.color==='red'?0:1]} 飛吃了 ${PIECES_CONFIG[target.type].name[target.color==='red'?0:1]}`);
+        else addLog(currentPlayer, `${PIECES_CONFIG[p.type].name[p.color==='red'?0:1]} 移動。`);
+
+        board[to.z][to.y][to.x] = p;
+        board[from.z][from.y][from.x] = null;
+
+        if(target && canPieceEatMore(to)) {
+            comboPiece = { ...to }; selected = { ...to };
+            if(currentPlayer === 'red' || document.getElementById('modeSelect').value === 'PvP') {
+                document.getElementById('endComboBtn').style.display = 'block';
+            }
+            render();
+            if (currentPlayer === 'black' && document.getElementById('modeSelect').value === 'PvC') {
+                setTimeout(aiMove, 800);
+            }
+            return 'combo';
+        } else {
+            switchTurn(); return 'success';
+        }
+    }
+
+    function checkPower(p, t) {
+        if(p.type==='P' && t.type==='K') return true;
+        if(p.type==='K' && t.type==='P') return false;
+        return PIECES_CONFIG[p.type].power >= PIECES_CONFIG[t.type].power;
+    }
+
+    function canPieceEatMore(pos) {
+        for(let z=0; z<4; z++) for(let y=0; y<4; y++) for(let x=0; x<4; x++) {
+            const m = checkMove(pos, {z,y,x});
+            const t = board[z][y][x];
+            if(m.can && t && (!t.revealed || t.color !== board[pos.z][pos.y][pos.x].color)) {
+                if(t.revealed && !m.invincible && !checkPower(board[pos.z][pos.y][pos.x], t)) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function switchTurn() {
+        selected = null; comboPiece = null;
+        document.getElementById('endComboBtn').style.display = 'none';
+        if(checkGameOver()) return;
+        currentPlayer = (currentPlayer === 'red') ? 'black' : 'red';
+        render();
+        if(currentPlayer === 'black' && document.getElementById('modeSelect').value === 'PvC') {
+            isAiThinking = true; setTimeout(aiMove, 600);
+        } else {
+            isAiThinking = false;
+        }
+    }
+
+    function forceEndTurn() { if(!isAiThinking) switchTurn(); }
+
+    function addLog(side, msg) {
+        const h = document.getElementById('history');
+        const d = document.createElement('div');
+        d.className = side === 'red' ? 'log-red' : 'log-black';
+        d.innerText = `[${side==='red'?'紅':'黑'}] ${msg}`;
+        h.prepend(d);
+    }
+
+    function checkGameOver() {
+        let r=0, b=0;
+        for(let z=0; z<4; z++) for(let y=0; y<4; y++) for(let x=0; x<4; x++) {
+            if(board[z][y][x]) board[z][y][x].color==='red' ? r++ : b++;
+        }
+        if(r===0 || b===0) { isGameOver = true; alert(`結束！${r===0?'黑方':'紅方'}勝`); return true; }
+        return false;
+    }
+
+    function aiMove() {
+        if(isGameOver) return;
+        if (comboPiece) {
+            let eats = [];
+            for(let z=0; z<4; z++) for(let y=0; y<4; y++) for(let x=0; x<4; x++) {
+                const m = checkMove(comboPiece, {z,y,x});
+                if(m.can && board[z][y][x]) eats.push({to:{z,y,x}, inv: m.invincible});
+            }
+            if(eats.length > 0) {
+                executeMove(comboPiece, eats[0].to, eats[0].inv); return;
+            } else { switchTurn(); return; }
+        }
+        let moves = []; let flips = [];
+        for(let z=0; z<4; z++) for(let y=0; y<4; y++) for(let x=0; x<4; x++) {
+            const p = board[z][y][x];
+            if(!p) continue;
+            if(!p.revealed) flips.push({z,y,x});
+            else if(p.color === 'black') {
+                for(let tz=0; tz<4; tz++) for(let ty=0; ty<4; ty++) for(let tx=0; tx<4; tx++) {
+                    const m = checkMove({z,y,x}, {z:tz,y:ty,x:tx});
+                    if(m.can) moves.push({from:{z,y,x}, to:{z:tz,y:ty,x:tx}, score: (board[tz][ty][tx]?10:1), inv: m.invincible});
+                }
+            }
+        }
+        if(moves.length > 0) {
+            moves.sort((a,b) => b.score - a.score);
+            if(moves[0].score > 1 || flips.length === 0) {
+                executeMove(moves[0].from, moves[0].to, moves[0].inv); return;
+            }
+        }
+        if(flips.length > 0) {
+            const f = flips[Math.floor(Math.random()*flips.length)];
+            board[f.z][f.y][f.x].revealed = true;
+            addLog('black', `翻開了棋子`);
+            switchTurn();
+        }
+    }
+
+    initGame();
+</script>
+</body>
+</html>
