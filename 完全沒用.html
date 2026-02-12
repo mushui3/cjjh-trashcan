@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>使用雜湊產生種子的灰階圖</title>
+  <style>
+    canvas {
+      image-rendering: pixelated;
+      width: 1024px;
+      height: 1024px;
+      border: 1px solid #000;
+    }
+    input, button {
+      margin: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>使用雜湊產生種子的隨機灰階圖</h2>
+  <label>
+    種子碼（留空為隨機）：
+    <input type="text" id="seedInput" placeholder="例如：hello123">
+  </label>
+  <button onclick="generate()">生成圖像</button>
+  <canvas id="grayCanvas" width="256" height="256"></canvas>
+
+  <script>
+    const canvas = document.getElementById('grayCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function xorshift32(seed) {
+      let x = seed >>> 0;
+      return function () {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        return (x >>> 0) / 0xFFFFFFFF;
+      };
+    }
+
+    async function hashSeed(str) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = new Uint8Array(hashBuffer);
+      const seed = (hashArray[0] << 24) | (hashArray[1] << 16) | (hashArray[2] << 8) | hashArray[3];
+      return seed >>> 0; // 無符號 32-bit 整數
+    }
+
+    async function generate() {
+      const seedText = document.getElementById('seedInput').value.trim();
+      let seed;
+
+      if (seedText) {
+        seed = await hashSeed(seedText);
+        console.log(`使用種子文字 "${seedText}" 雜湊為種子：${seed}`);
+      } else {
+        seed = Math.floor(Math.random() * 0xFFFFFFFF);
+        console.log(`使用隨機種子：${seed}`);
+      }
+
+      const rand = xorshift32(seed);
+      const width = canvas.width;
+      const height = canvas.height;
+      const imageData = ctx.createImageData(width, height);
+      const data = imageData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = Math.floor(rand() * 256);
+        data[i]     = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+        data[i + 3] = 255;
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    // 初始產生
+    generate();
+  </script>
+</body>
+</html>

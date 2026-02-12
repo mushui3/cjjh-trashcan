@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>死亡足球：拖曳發射與撞擊淘汰 (10 vs 10)</title>
+    <style>
+        /* CSS 樣式 */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding-top: 20px;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            gap: 20px;
+        }
+        #gameArea {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #gameCanvas {
+            border: 5px solid #333;
+            background-color: #008000; /* 草地顏色 */
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.7);
+            cursor: pointer;
+        }
+        #scoreBoard {
+            margin-bottom: 10px;
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+        }
+        #message {
+            margin-top: 10px;
+            font-size: 20px;
+            color: #333;
+            height: 30px;
+        }
+        .player-info {
+            font-size: 16px;
+            margin-top: 5px;
+        }
+        .blue-text { color: blue; }
+        .red-text { color: red; }
+
+        /* 遊戲歷程視窗樣式 */
+        #gameLogContainer {
+            width: 300px;
+            height: 600px; 
+            background-color: #fff;
+            border: 2px solid #555;
+            box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        #logTitle {
+            padding: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #333;
+            color: white;
+            text-align: center;
+        }
+        #gameLog {
+            flex-grow: 1;
+            overflow-y: auto; 
+            padding: 10px;
+            font-size: 14px;
+            line-height: 1.4;
+            display: flex;
+            flex-direction: column-reverse; /* 新訊息在底部 */
+        }
+        .log-entry {
+            padding: 3px 0;
+            border-bottom: 1px dotted #eee;
+        }
+        .log-goal { color: darkgreen; font-weight: bold; }
+        .log-kill { color: darkred; font-weight: bold; }
+        .log-info { color: gray; }
+    </style>
+</head>
+<body>
+
+    <div id="gameArea">
+        <div id="scoreBoard">⚽ 藍隊: 0 - 紅隊: 0 ⚽</div>
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        <div id="message">遊戲載入中...</div>
+        <div class="player-info">
+            <span class="blue-text">藍隊</span> (左半場, 玩家操作) | 
+            <span class="red-text">紅隊</span> (右半場, AI自動發射)
+        </div>
+        <div class="player-info">
+            🚨 **撞擊淘汰規則**：球員高速對撞時，速度較慢的一方有<span style="font-weight: bold; color: darkred;">機率</span>被撞出局！<span style="color: blue;">(同隊撞擊安全，機率隨人數減少而降低)</span>
+        </div>
+    </div>
+
+    <div id="gameLogContainer">
+        <div id="logTitle">📝 遊戲歷程</div>
+        <div id="gameLog">
+            </div>
+    </div>
+
+    <script>
+        // JavaScript 遊戲邏輯
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const messageDiv = document.getElementById('message');
+        const gameLogDiv = document.getElementById('gameLog'); 
+
+        // 遊戲常量
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+        const PLAYER_RADIUS = 12;
+        const BALL_RADIUS = 8;
+        const GOAL_WIDTH = 10;
+        const GOAL_HEIGHT = 120;
+        const FRICTION_PLAYER = 0.98;
+        const FRICTION_BALL = 0.99;
+        const KICK_POWER_MULTIPLIER = 0.15;
+        const MAX_KICK_DISTANCE = 150;
+
+        // 撞死機制常量
+        const KILL_CHANCE_BASE = 0.05; // 基礎「撞死」機率 (5%)
+        const KILL_CHANCE_SPEED_FACTOR = 0.025; // 每單位速度增加的機率係數
+        const KILL_CHANCE_MIN_SPEED = 3; // 至少要達到此相對速度差才有機率被撞死
+        const INITIAL_PLAYER_COUNT = 20; // 初始總人數 (10藍 + 10紅)
+
+        // 遊戲狀態物件
+        let game = {
+            score: { blue: 0, red: 0 },
+            mouse: { x: 0, y: 0, down: false, startX: 0, startY: 0 },
+            selectedPlayer: null,
+            players: [],
+            ball: null,
+            turn: 'blue',
+            running: true
+        };
+        
+        // ------------------ Log 紀錄功能 ------------------
+        function logMessage(text, type = 'info') {
+            const entry = document.createElement('div');
+            entry.classList.add('log-entry');
+            entry.classList.add(`log-${type}`);
+            entry.textContent = text;
+            gameLogDiv.prepend(entry); 
+
+            while (gameLogDiv.children.length > 50) {
+                gameLogDiv.removeChild(gameLogDiv.lastChild);
+            }
+        }
+
+        // ------------------ Player 類別 & Ball 物件 (與前一個版本相同) ------------------
+        class Player {
+            constructor(id, x, y, team, color) {
+                this.id = id;
+                this.initialX = x;
+                this.initialY = y;
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.team = team;
+                this.color = color;
+                this.radius = PLAYER_RADIUS;
+                this.mass = 1;
+                this.isAlive = true;
+            }
+
+            update() {
+                if (!this.isAlive) return;
+                this.vx *= FRICTION_PLAYER;
+                this.vy *= FRICTION_PLAYER;
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x - this.radius < 0 || this.x + this.radius > WIDTH) {
+                    this.vx *= -1;
+                    this.x = Math.max(this.radius, Math.min(WIDTH - this.radius, this.x));
+                }
+                if (this.y - this.radius < 0 || this.y + this.radius > HEIGHT) {
+                    this.vy *= -1;
+                    this.y = Math.max(this.radius, Math.min(HEIGHT - this.radius, this.y));
+                }
+            }
+
+            draw() {
+                if (!this.isAlive) return;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '10px Arial';
+                ctx.fillText(this.id, this.x, this.y);
+            }
+        }
+        game.ball = {
+            x: WIDTH / 2,
+            y: HEIGHT / 2,
+            vx: 0,
+            vy: 0,
+            radius: BALL_RADIUS,
+            color: 'white',
+            mass: 0.5,
+            update: function() {
+                this.vx *= FRICTION_BALL;
+                this.vy *= FRICTION_BALL;
+                this.x += this.vx;
+                this.y += this.vy;
+            },
+            draw: function() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        };
+
+        // ------------------ 初始化與佈局 (與前一個版本相同) ------------------
+        function getInitialPositions() {
+            const bluePositions = [
+                {x: WIDTH / 10, y: HEIGHT / 2}, 
+                {x: WIDTH / 6, y: HEIGHT * 0.15}, {x: WIDTH / 6, y: HEIGHT * 0.85}, 
+                {x: WIDTH / 4, y: HEIGHT * 0.3}, {x: WIDTH / 4, y: HEIGHT * 0.7}, 
+                {x: WIDTH / 3, y: HEIGHT * 0.1}, {x: WIDTH / 3, y: HEIGHT * 0.9}, 
+                {x: WIDTH * 0.4, y: HEIGHT * 0.4}, {x: WIDTH * 0.4, y: HEIGHT * 0.6}, 
+                {x: WIDTH * 0.45, y: HEIGHT / 2} 
+            ];
+            const redPositions = [
+                {x: WIDTH * 0.9, y: HEIGHT / 2}, 
+                {x: WIDTH * 5 / 6, y: HEIGHT * 0.15}, {x: WIDTH * 5 / 6, y: HEIGHT * 0.85}, 
+                {x: WIDTH * 3 / 4, y: HEIGHT * 0.3}, {x: WIDTH * 3 / 4, y: HEIGHT * 0.7}, 
+                {x: WIDTH * 2 / 3, y: HEIGHT * 0.1}, {x: WIDTH * 2 / 3, y: HEIGHT * 0.9}, 
+                {x: WIDTH * 0.6, y: HEIGHT * 0.4}, {x: WIDTH * 0.6, y: HEIGHT * 0.6}, 
+                {x: WIDTH * 0.55, y: HEIGHT / 2} 
+            ];
+            return { bluePositions, redPositions };
+        }
+
+        function initPlayers() {
+            game.players = [];
+            const { bluePositions, redPositions } = getInitialPositions();
+
+            bluePositions.forEach((pos, i) => {
+                game.players.push(new Player(`B${i + 1}`, pos.x, pos.y, 'blue', 'blue'));
+            });
+
+            redPositions.forEach((pos, i) => {
+                game.players.push(new Player(`R${i + 1}`, pos.x, pos.y, 'red', 'red'));
+            });
+            logMessage(`遊戲開始! 藍隊(${game.players.length/2}人) vs 紅隊(${game.players.length/2}人)`, 'info');
+        }
+        
+        // ------------------ 物理與碰撞 (重點修改區域) ------------------
+
+        function updatePhysics() {
+            const activePlayers = game.players.filter(p => p.isAlive);
+            activePlayers.forEach(p => p.update());
+            game.ball.update();
+            activePlayers.forEach(p => checkPlayerBallCollision(p, game.ball));
+            for (let i = 0; i < activePlayers.length; i++) {
+                for (let j = i + 1; j < activePlayers.length; j++) {
+                    checkPlayerPlayerCollision(activePlayers[i], activePlayers[j]);
+                }
+            }
+            checkBallBounds(game.ball);
+            checkTurnEnd();
+        }
+
+        function checkPlayerBallCollision(p, ball) {
+            // (與前一個版本相同)
+            const dx = ball.x - p.x;
+            const dy = ball.y - p.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const minDistance = p.radius + ball.radius;
+
+            if (distance < minDistance) {
+                const angle = Math.atan2(dy, dx);
+                const overlap = minDistance - distance;
+
+                p.x -= overlap * Math.cos(angle) * (ball.mass / (p.mass + ball.mass));
+                p.y -= overlap * Math.sin(angle) * (ball.mass / (p.mass + ball.mass));
+                ball.x += overlap * Math.cos(angle) * (p.mass / (p.mass + ball.mass));
+                ball.y += overlap * Math.sin(angle) * (p.mass / (p.mass + ball.mass));
+
+                const totalMass = p.mass + ball.mass;
+                const dvx = p.vx - ball.vx;
+                const dvy = p.vy - ball.vy;
+                const impulse = (dx * dvx + dy * dvy) / (distance * distance);
+
+                const impulseX = impulse * dx;
+                const impulseY = impulse * dy;
+
+                p.vx -= impulseX * ball.mass / totalMass;
+                p.vy -= impulseY * ball.mass / totalMass;
+                ball.vx += impulseX * p.mass / totalMass;
+                ball.vy += impulseY * p.mass / totalMass;
+            }
+        }
+
+        function checkPlayerPlayerCollision(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const minDistance = p1.radius + p2.radius;
+
+            if (distance < minDistance) {
+                // --- 1. 物理碰撞處理 (保留) ---
+                const angle = Math.atan2(dy, dx);
+                const overlap = minDistance - distance;
+                const totalMass = p1.mass + p2.mass;
+                
+                // 位置修正
+                p1.x -= overlap * Math.cos(angle) * (p2.mass / totalMass);
+                p1.y -= overlap * Math.sin(angle) * (p2.mass / totalMass);
+                p2.x += overlap * Math.cos(angle) * (p1.mass / totalMass);
+                p2.y += overlap * Math.sin(angle) * (p1.mass / totalMass);
+
+                // 速度交換
+                const dvx = p1.vx - p2.vx;
+                const dvy = p1.vy - p2.vy;
+                const impulse = (dx * dvx + dy * dvy) / (distance * distance);
+
+                const impulseX = impulse * dx;
+                const impulseY = impulse * dy;
+
+                p1.vx -= impulseX * p2.mass / totalMass;
+                p1.vy -= impulseY * p2.mass / totalMass;
+                p2.vx += impulseX * p1.mass / totalMass;
+                p2.vy += impulseY * p1.mass / totalMass;
+
+                // --- 2. 撞死機率邏輯 (核心修改) ---
+
+                // **【修改 1】同隊撞擊安全檢查**
+                if (p1.team === p2.team) {
+                    // 同隊球員只進行物理碰撞，不會被撞死
+                    return;
+                }
+                
+                // 計算撞擊後的相對速度（即衝量的大小）
+                const relativeSpeed = Math.sqrt(impulseX**2 + impulseY**2) * 50; 
+                
+                if (relativeSpeed > KILL_CHANCE_MIN_SPEED) {
+                    // **【修改 2】機率受存活人數影響**
+                    const activeCount = game.players.filter(p => p.isAlive).length;
+                    const countFactor = activeCount / INITIAL_PLAYER_COUNT; // 例如：10人/20人 = 0.5
+
+                    let extraChance = (relativeSpeed - KILL_CHANCE_MIN_SPEED) * KILL_CHANCE_SPEED_FACTOR;
+                    
+                    // 將機率乘以人數因子 (人數越少，這個因子越低，總機率越低)
+                    let killChance = (KILL_CHANCE_BASE + extraChance) * countFactor; 
+                    
+                    killChance = Math.min(killChance, 0.7); // 最高 70% 機率
+
+                    const randomValue = Math.random();
+
+                    if (randomValue < killChance) {
+                        const p1ImpactSpeed = Math.sqrt(p1.vx**2 + p1.vy**2);
+                        const p2ImpactSpeed = Math.sqrt(p2.vx**2 + p2.vy**2);
+                        
+                        let killedPlayer = null;
+                        let killerPlayer = null;
+                        
+                        // 誰慢誰出局
+                        if (p1ImpactSpeed < p2ImpactSpeed) {
+                            killedPlayer = p1;
+                            killerPlayer = p2;
+                        } else {
+                            killedPlayer = p2;
+                            killerPlayer = p1;
+                        }
+                        
+                        killedPlayer.isAlive = false;
+                        killedPlayer.vx = 0;
+                        killedPlayer.vy = 0;
+                        
+                        const chancePercent = Math.round(killChance * 100);
+
+                        messageDiv.textContent = `🚨 ${killedPlayer.color}隊球員 ${killedPlayer.id} 被「撞出局」! (實際機率: ${chancePercent}%) 🚨`;
+                        logMessage(`❌ ${killerPlayer.color}隊 ${killerPlayer.id} 撞死 ${killedPlayer.color}隊 ${killedPlayer.id}！(實際機率: ${chancePercent}%)`, 'kill');
+                    }
+                }
+            }
+        }
+
+        // ------------------ 遊戲流程控制 (與前一個版本相同) ------------------
+
+        function isMoving() {
+            const activePlayers = game.players.filter(p => p.isAlive);
+            const ballMoving = (Math.abs(game.ball.vx) > 0.1 || Math.abs(game.ball.vy) > 0.1);
+            const playerMoving = activePlayers.some(p => Math.abs(p.vx) > 0.1 || Math.abs(p.vy) > 0.1);
+            return ballMoving || playerMoving;
+        }
+
+        function getPlayerCounts() {
+            return {
+                blueCount: game.players.filter(p => p.team === 'blue' && p.isAlive).length,
+                redCount: game.players.filter(p => p.team === 'red' && p.isAlive).length
+            };
+        }
+
+        function checkTurnEnd() {
+            const { blueCount, redCount } = getPlayerCounts();
+            
+            if (blueCount === 0 && redCount === 0) {
+                 handleGameOver('平手');
+                 return;
+            } else if (blueCount === 0) {
+                handleGameOver('red');
+                return;
+            } else if (redCount === 0) {
+                handleGameOver('blue');
+                return;
+            }
+
+            if (isMoving()) {
+                // messageDiv.textContent = `回合進行中... | 藍隊: ${blueCount} 人 | 紅隊: ${redCount} 人`;
+                game.selectedPlayer = null;
+            } else {
+                messageDiv.textContent = `請點擊場上存活球員進行發射 (${game.turn === 'blue' ? '藍隊' : '紅隊'}回合) | 藍隊: ${blueCount} 人 | 紅隊: ${redCount} 人`;
+                
+                if (game.turn === 'red') {
+                    setTimeout(aiShoot, 1000); 
+                }
+            }
+        }
+
+        function handleGoal(scoringTeam) {
+            if (game.running) {
+                if (scoringTeam === 'blue') {
+                    game.score.blue++;
+                } else {
+                    game.score.red++;
+                }
+
+                scoreBoard.textContent = `⚽ 藍隊: ${game.score.blue} - 紅隊: ${game.score.red} ⚽`;
+                messageDiv.textContent = `${scoringTeam === 'blue' ? '藍隊' : '紅隊'}得分！回合重置...`;
+                logMessage(`🥅 ${scoringTeam === 'blue' ? '藍隊' : '紅隊'}得分！比分 ${game.score.blue}:${game.score.red}`, 'goal');
+                game.running = false; 
+
+                setTimeout(() => {
+                    resetRound(scoringTeam);
+                }, 2000);
+            }
+        }
+
+        function handleGameOver(winnerTeam) {
+            game.running = false;
+            scoreBoard.textContent = `🏁 最終比分 藍隊: ${game.score.blue} - 紅隊: ${game.score.red} 🏁`;
+            
+            let message = '';
+            if (winnerTeam === '平手') {
+                message = '🏆 比賽結束! 所有球員出局，平手。 🏆';
+            } else {
+                message = `🏆 比賽結束! ${winnerTeam === 'blue' ? '藍隊' : '紅隊'} 獲勝！🏆`;
+            }
+
+            messageDiv.textContent = message + ' (請刷新頁面重新開始)';
+            logMessage(message, 'info'); 
+        }
+
+        function resetRound(startingTeam) {
+            game.ball.x = WIDTH / 2;
+            game.ball.y = HEIGHT / 2;
+            game.ball.vx = 0;
+            game.ball.vy = 0;
+
+            game.players.filter(p => p.isAlive).forEach(p => { 
+                p.x = p.initialX; 
+                p.y = p.initialY; 
+                p.vx = 0; 
+                p.vy = 0; 
+            });
+            
+            game.turn = startingTeam; 
+            game.running = true;
+            logMessage(`新回合開始。由 ${startingTeam === 'blue' ? '藍隊' : '紅隊'} 開球。`, 'info');
+
+            if (game.turn === 'red') {
+                setTimeout(aiShoot, 500);
+            }
+        }
+        
+        // ------------------ AI 邏輯 (紅隊) (與前一個版本相同) ------------------
+        
+        function aiShoot() {
+            if (game.turn !== 'red' || isMoving()) return;
+            
+            const activeRedPlayers = game.players.filter(p => p.team === 'red' && p.isAlive);
+            if (activeRedPlayers.length === 0) {
+                game.turn = 'blue';
+                return;
+            }
+
+            let closestPlayer = activeRedPlayers.reduce((closest, p) => {
+                const dist = Math.sqrt((p.x - game.ball.x)**2 + (p.y - game.ball.y)**2);
+                return dist < closest.dist ? { player: p, dist: dist } : closest;
+            }, { player: null, dist: Infinity }).player;
+            
+            if (closestPlayer) {
+                const targetX = GOAL_WIDTH + 10; 
+                const targetY = HEIGHT / 2;
+                
+                const dxTarget = targetX - closestPlayer.x;
+                const dyTarget = targetY - closestPlayer.y;
+
+                const shootVectorX = - (dxTarget * 0.35); 
+                const shootVectorY = - (dyTarget * 0.35);
+                
+                const distance = Math.sqrt(shootVectorX**2 + shootVectorY**2);
+                const power = Math.min(distance, MAX_KICK_DISTANCE * 0.8); 
+                
+                const normalizedX = shootVectorX / distance;
+                const normalizedY = shootVectorY / distance;
+
+                const kickVx = -normalizedX * power * KICK_POWER_MULTIPLIER;
+                const kickVy = -normalizedY * power * KICK_POWER_MULTIPLIER;
+
+                closestPlayer.vx = kickVx;
+                closestPlayer.vy = kickVy;
+                
+                game.turn = 'blue';
+                logMessage(`紅隊 ${closestPlayer.id} 發射！`, 'info');
+            }
+        }
+
+        // ------------------ 繪圖函數 (與前一個版本相同) ------------------
+
+        function drawField() {
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(WIDTH / 2, 0); ctx.lineTo(WIDTH / 2, HEIGHT); ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(WIDTH / 2, HEIGHT / 2, 50, 0, Math.PI * 2); ctx.stroke();
+
+            ctx.fillStyle = 'yellow';
+            ctx.fillRect(0, HEIGHT / 2 - GOAL_HEIGHT / 2, GOAL_WIDTH, GOAL_HEIGHT);
+            ctx.fillRect(WIDTH - GOAL_WIDTH, HEIGHT / 2 - GOAL_HEIGHT / 2, GOAL_WIDTH, GOAL_HEIGHT);
+        }
+        
+        function drawShootIndicator() {
+            if (!game.selectedPlayer || !game.mouse.down) return;
+
+            const p = game.selectedPlayer;
+            const mouseX = game.mouse.x;
+            const mouseY = game.mouse.y;
+
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(mouseX, mouseY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const dx = p.x - mouseX;
+            const dy = p.y - mouseY;
+            const distance = Math.min(Math.sqrt(dx * dx + dy * dy), MAX_KICK_DISTANCE);
+            
+            const normalizedX = dx / distance;
+            const normalizedY = dy / distance;
+
+            const predictedVx = normalizedX * distance * KICK_POWER_MULTIPLIER;
+            const predictedVy = normalizedY * distance * KICK_POWER_MULTIPLIER;
+
+            const endX = p.x + predictedVx * 5; 
+            const endY = p.y + predictedVy * 5; 
+            
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.lineWidth = 5;
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+        }
+
+        // ------------------ 事件與循環 (與前一個版本相同) ------------------
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (isMoving() || game.turn === 'red' || !game.running) return; 
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const clickedPlayer = game.players.find(p => 
+                p.isAlive && 
+                p.team === game.turn && 
+                Math.sqrt((p.x - mouseX)**2 + (p.y - mouseY)**2) < p.radius
+            );
+
+            if (clickedPlayer) {
+                game.mouse.down = true;
+                game.mouse.startX = mouseX;
+                game.mouse.startY = mouseY;
+                game.selectedPlayer = clickedPlayer;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            game.mouse.x = e.clientX - rect.left;
+            game.mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (game.mouse.down && game.selectedPlayer) {
+                const p = game.selectedPlayer;
+                const dragX = game.mouse.x - game.mouse.startX;
+                const dragY = game.mouse.y - game.mouse.startY;
+                
+                const distance = Math.min(Math.sqrt(dragX * dragX + dragY * dragY), MAX_KICK_DISTANCE);
+                const normalizedDragX = dragX / distance;
+                const normalizedDragY = dragY / distance;
+
+                const kickVx = -normalizedDragX * distance * KICK_POWER_MULTIPLIER;
+                const kickVy = -normalizedDragY * distance * KICK_POWER_MULTIPLIER;
+
+                p.vx = kickVx;
+                p.vy = kickVy;
+
+                logMessage(`藍隊 ${p.id} 發射！`, 'info');
+
+                game.mouse.down = false;
+                game.selectedPlayer = null;
+                game.turn = (game.turn === 'blue' ? 'red' : 'blue');
+            }
+        });
+
+        // ------------------ 邊界檢查與球門 (與前一個版本相同) ------------------
+        function checkBallBounds(ball) {
+            const inGoalY = ball.y >= HEIGHT / 2 - GOAL_HEIGHT / 2 && ball.y <= HEIGHT / 2 + GOAL_HEIGHT / 2;
+
+            if (ball.x - ball.radius <= 0) {
+                 if (inGoalY) {
+                     handleGoal('red');
+                     return;
+                 } else {
+                     ball.vx *= -1;
+                     ball.x = ball.radius;
+                 }
+            } 
+            else if (ball.x + ball.radius >= WIDTH) {
+                 if (inGoalY) {
+                     handleGoal('blue');
+                     return;
+                 } else {
+                     ball.vx *= -1;
+                     ball.x = WIDTH - ball.radius;
+                 }
+            }
+            if (ball.y - ball.radius < 0 || ball.y + ball.radius > HEIGHT) {
+                ball.vy *= -1;
+                ball.y = Math.max(ball.radius, Math.min(HEIGHT - ball.radius, ball.y));
+            }
+        }
+
+
+        function gameLoop() {
+            if (!game.running) {
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            drawField();
+            drawShootIndicator();
+
+            updatePhysics();
+            
+            game.players.forEach(p => p.draw());
+            game.ball.draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 啟動遊戲
+        initPlayers();
+        gameLoop();
+        logMessage("遊戲載入完成，藍隊先發射。", 'info');
+    </script>
+</body>
+</html>

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>Block Brawl Online - 修正版</title>
+<style>
+body { margin:0; overflow:hidden; font-family:'Segoe UI',sans-serif; }
+canvas { display:block; background:linear-gradient(45deg,#d8b68a,#b89060); }
+#ui {
+  position:absolute; top:10px; left:10px; width:260px; background:rgba(255,255,255,0.85);
+  padding:10px; border-radius:10px; box-shadow:0 0 10px #0004;
+}
+textarea,input { width:100%; margin:5px 0; }
+button { width:100%; margin-top:4px; padding:5px; font-weight:bold; border-radius:6px;
+         background:#b96e3c; border:none; color:#fff; cursor:pointer; }
+button:hover { background:#9c5c32; }
+#chatBox { position:absolute; bottom:10px; left:10px; width:280px; background:rgba(255,255,255,0.85);
+          border-radius:10px; padding:8px; box-shadow:0 0 10px #0004; }
+#messages { height:100px; overflow-y:auto; background:#fff; border-radius:5px; padding:4px; font-size:14px; }
+#chatInput { width:75%; } #sendMsg { width:23%; }
+#status { position:absolute; top:10px; right:10px; padding:8px 12px; border-radius:8px;
+         background:rgba(0,0,0,0.7); color:#fff; font-weight:bold; }
+</style>
+</head>
+<body>
+<canvas id="game" width="900" height="500"></canvas>
+
+<div id="ui">
+  <h3>🧱 Block Brawl Online (2人)</h3>
+  <textarea id="offer" placeholder="貼上對方的 Offer 或 Answer"></textarea>
+  <button id="btnCreateOffer">建立房間 (Host)</button>
+  <button id="btnSetAnswer">設定 Answer / 加入房間</button>
+  <button id="btnRestart">重新開始</button>
+</div>
+
+<div id="chatBox">
+  <div id="messages"></div>
+  <input id="chatInput" placeholder="輸入訊息...">
+  <button id="sendMsg">送出</button>
+</div>
+
+<div id="status">等待中...</div>
+
+<script>
+const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
+const FLOOR=450; 
+let myId="p"+Math.floor(Math.random()*9999);
+let color='#'+Math.floor(Math.random()*0xffffff).toString(16);
+let players={}, bullets=[], effects=[];
+players[myId]={id:myId,x:100,y:FLOOR,vx:0,vy:0,hp:100,color:color,facing:1,lastHit:0,lastAction:0};
+let keys={}, gameOver=false, restartCountdown=0, requestedRestart=false;
+
+/* === WebRTC === */
+let pc=new RTCPeerConnection(), dc=null, isHost=false;
+dc = pc.createDataChannel("game");
+dc.onopen = ()=>log("✅ DataChannel 已連線，可操作");
+dc.onmessage = e => handleMessage(JSON.parse(e.data));
+pc.ondatachannel = e => {dc=e.channel; dc.onopen=()=>log("✅ 已連線"); dc.onmessage=e=>handleMessage(JSON.parse(e.data));};
+pc.onicecandidate = e=>{if(!e.candidate) document.getElementById("offer").value=JSON.stringify(pc.localDescription);};
+
+document.getElementById("btnCreateOffer").onclick=async()=>{
+  isHost=true;
+  let offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  log("📡 已建立房間 Offer，請複製給對方");
+};
+document.getElementById("btnSetAnswer").onclick=async()=>{
+  const input=JSON.parse(document.getElementById("offer").value);
+  await pc.setRemoteDescription(input);
+  if(input.type==="offer"){
+    let answer=await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    document.getElementById("offer").value=JSON.stringify(pc.localDescription);
+    log("📡 已建立 Answer，回傳給房主");
+  } else log("🔗 已設定對方 Answer");
+};
+
+function log(msg){
+  const box=document.getElementById("messages");
+  const div=document.createElement("div");
+  div.textContent=msg;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+}
+function broadcast(msg){ if(dc && dc.readyState==='open') dc.send(JSON.stringify(msg)); }
+
+/* === 聊天 === */
+document.getElementById("sendMsg").onclick=()=>{
+  const msg=document.getElementById("chatInput").value.trim();
+  if(!msg) return;
+  addMessage("你",msg);
+  broadcast({type:"chat",sender:myId,text:msg});
+  document.getElementById("chatInput").value="";
+};
+function addMessage(sender,msg){ log(sender+": "+msg); }
+
+function handleMessage(msg){
+  switch(msg.type){
+    case "state": players[msg.id]=msg.payload; break;
+    case "chat": addMessage(msg.sender,msg.text); break;
+    case "attack": 
+      if(players[msg.target]){
+        players[msg.target].hp-=msg.damage;
+        players[msg.target].lastHit=Date.now();
+        spawnHitEffect(players[msg.target].x+20,players[msg.target].y-20);
+        checkVictory();
+      }
+      break;
+    case "bullet": bullets.push(msg.data); break;
+    case "restart": triggerRestartCountdown(); break;
+  }
+}
+
+/* === 重新開始 === */
+document.getElementById("btnRestart").onclick=()=>{
+  if(!requestedRestart){
+    requestedRestart=true;
+    broadcast({type:"restart"});
+    triggerRestartCountdown();
+  }
+};
+function triggerRestartCountdown(){
+  restartCountdown=10;
+  let timer=setInterval(()=>{
+    restartCountdown--;
+    setStatus("⏳ 新局 "+restartCountdown+" 秒");
+    if(restartCountdown<=0){
+      clearInterval(timer);
+      resetGame();
+    }
+  },1000);
+}
+function resetGame(){
+  for(let id in players){
+    players[id].hp=100;
+    players[id].x=Math.random()*(canvas.width-80);
+    players[id].y=FLOOR;
+    players[id].lastHit=0;
+    players[id].lastAction=0;
+  }
+  bullets=[]; effects=[]; gameOver=false; requestedRestart=false;
+  setStatus("🔥 新局開始！");
+}
+
+/* === 控制 === */
+function enableControls(){
+  document.addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+  document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+}
+enableControls();
+
+/* === 遊戲邏輯 === */
+let lastShootTime=0, lastMeleeTime=0;
+const SHOOT_COOLDOWN=500, MELEE_COOLDOWN=500, BULLET_DAMAGE=5, MELEE_DAMAGE=6;
+
+function meleeAttack(){
+  const now=Date.now();
+  if(now - lastMeleeTime < MELEE_COOLDOWN) return;
+  lastMeleeTime = now;
+
+  const me=players[myId];
+  me.lastAction=Date.now();
+  for(let id in players){
+    if(id===myId) continue;
+    let p=players[id];
+    if(Math.abs(p.x-me.x)<50 && Math.abs(p.y-me.y)<30){
+      p.hp-=MELEE_DAMAGE;
+      p.lastHit=Date.now();
+      spawnHitEffect(p.x+20,p.y-20);
+      broadcast({type:"attack",target:id,damage:MELEE_DAMAGE});
+      if(p.hp<=0) checkVictory();
+    }
+  }
+}
+
+function shoot(){
+  const now=Date.now();
+  if(now - lastShootTime < SHOOT_COOLDOWN) return;
+  lastShootTime=now;
+  players[myId].lastAction=now;
+  const me=players[myId];
+  const bullet={x:me.x+20,y:me.y-20,vx:me.facing*8,owner:myId,life:60};
+  bullets.push(bullet);
+  broadcast({type:"bullet",data:bullet});
+}
+
+function spawnHitEffect(x,y){
+  for(let i=0;i<10;i++) effects.push({x,y,vx:Math.random()*4-2,vy:Math.random()*-3,life:30});
+}
+
+function updatePlayer(p){
+  if(!p) return;
+  if(keys["a"]){p.vx=-4;p.facing=-1;}
+  else if(keys["d"]){p.vx=4;p.facing=1;}
+  else p.vx=0;
+  if(keys["w"] && p.y>=FLOOR) p.vy=-10;
+  if(keys["j"]) meleeAttack();
+  if(keys["k"]) shoot();
+  p.vy+=0.6; p.x+=p.vx; p.y+=p.vy;
+  if(p.y>FLOOR){p.y=FLOOR;p.vy=0;}
+  if(p.x<0)p.x=0; if(p.x>canvas.width-40)p.x=canvas.width-40;
+  
+  // 自動回血
+  if(Date.now() - p.lastHit > 1000 && Date.now() - p.lastAction > 1000 && p.hp < 100){
+    p.hp += 0.083 * 5; // 約5HP/s
+    if(p.hp > 100) p.hp = 100;
+  }
+
+  broadcast({type:"state",id:myId,payload:p});
+}
+
+function updateBullets(){
+  for(let b of bullets){
+    b.x+=b.vx; b.life--;
+    if(b.life<=0){b.remove=true; continue;}
+    for(let id in players){
+      if(id===b.owner) continue;
+      let p=players[id];
+      if(Math.abs(b.x-p.x)<30 && Math.abs(b.y-p.y)<30){
+        p.hp-=BULLET_DAMAGE;
+        p.lastHit=Date.now();
+        spawnHitEffect(p.x+20,p.y-20);
+        b.remove=true;
+        if(p.hp<=0) checkVictory();
+      }
+    }
+  }
+  bullets=bullets.filter(b=>!b.remove);
+}
+
+/* === 玩家碰撞修正版 === */
+function resolvePlayerCollision(){
+  const ids=Object.keys(players);
+  if(ids.length<2) return;
+  let [a,b]=[players[ids[0]],players[ids[1]]];
+  let dx=a.x - b.x;
+  let dy=a.y - b.y;
+
+  // 水平推開
+  if(Math.abs(dx)<40 && Math.abs(dy)<40){
+    const push=(40 - Math.abs(dx))/2;
+    if(dx>0){ a.x+=push; b.x-=push; }
+    else { a.x-=push; b.x+=push; }
+  }
+
+  // 垂直站立判定
+  if(Math.abs(dx)<35){
+    if(dy>0 && dy<40){ // a 在 b 上
+      a.y = b.y - 40;
+      a.vy = Math.min(0,a.vy);
+    } else if(dy<0 && dy>-40){ // b 在 a 上
+      b.y = a.y - 40;
+      b.vy = Math.min(0,b.vy);
+    }
+  }
+}
+
+/* === 勝負 === */
+function checkVictory(){
+  let alive=Object.values(players).filter(p=>p.hp>0);
+  if(alive.length===1 && !gameOver){
+    gameOver=true;
+    log("🏆 "+alive[0].id+" 勝利！");
+    broadcast({type:"chat",sender:"系統",text:alive[0].id+" 勝利！"});
+    broadcast({type:"restart"});
+    triggerRestartCountdown();
+  }
+}
+
+/* === 繪製 === */
+function drawBullets(){ ctx.fillStyle="orange"; bullets.forEach(b=>ctx.fillRect(b.x,b.y,6,6)); }
+function drawEffects(){ ctx.fillStyle="yellow"; effects.forEach(e=>{ ctx.fillRect(e.x,e.y,3,3); e.x+=e.vx;e.y+=e.vy;e.vy+=0.2;e.life--; }); effects=effects.filter(e=>e.life>0); }
+function setStatus(msg){ document.getElementById("status").textContent=msg; }
+
+/* === 主迴圈 === */
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#deb887"; ctx.fillRect(0,FLOOR+30,canvas.width,30);
+  for(let id in players){
+    let p=players[id];
+    ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y-40,40,40);
+    ctx.fillStyle="red"; ctx.fillRect(p.x,p.y-50,p.hp/2,5);
+  }
+  drawBullets(); drawEffects();
+  if(!gameOver){ updatePlayer(players[myId]); updateBullets(); resolvePlayerCollision(); }
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+setStatus("請建立或加入房間");
+</script>
+</body>
+</html>

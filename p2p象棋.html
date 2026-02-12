@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>線上雙人中國象棋（WebRTC P2P）</title>
+<style>
+body { font-family: "Microsoft JhengHei", sans-serif; background:#d9c4a3; margin:0; padding:0; display:flex; }
+#container { display:flex; margin:20px; }
+#boardCanvas { border:3px solid #8b5a2b; background:#f0e1c4; border-radius:8px; cursor:pointer; }
+#history { margin-left:20px; width:200px; height:500px; overflow:auto; background:#fff3e0; padding:10px; border-radius:6px; border:1px solid #ccc; }
+#controls { margin-bottom:10px; }
+button { margin-right:5px; padding:6px 12px; }
+#status { margin-bottom:8px; padding:6px; background:#eee; border-radius:6px; font-weight:bold; }
+textarea { width:100%; height:80px; margin-bottom:8px; }
+#resignPrompt { display:none; position:absolute; top:40%; left:40%; background:#fff3e0; border:2px solid #8b5a2b; padding:20px; border-radius:6px; z-index:10; }
+#resignPrompt button { margin:5px; }
+#restartPrompt { display:none; position:absolute; top:40%; left:40%; background:#fff3e0; border:2px solid #8b5a2b; padding:20px; border-radius:6px; z-index:10; }
+#restartPrompt button { margin:5px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <div>
+    <div id="status">狀態：尚未開始</div>
+    <div id="controls">
+      <button id="btnCreateOffer">建立房間</button>
+      <button id="btnSetRemote">設定 Remote</button>
+      <button id="btnResign">投降</button>
+      <button id="btnRestart">重新開局</button>
+    </div>
+    <textarea id="signal" placeholder="貼上對方的 Offer 或 Answer"></textarea>
+    <canvas id="boardCanvas" width="450" height="500"></canvas>
+  </div>
+  <div id="history">
+    <h4>棋譜歷程</h4>
+    <div id="moves"></div>
+  </div>
+</div>
+
+<!-- 投降提示 -->
+<div id="resignPrompt">
+  <div>你確定要投降嗎？</div>
+  <button id="resignYes">是</button>
+  <button id="resignNo">否</button>
+</div>
+
+<!-- 重新開局提示 -->
+<div id="restartPrompt">
+  <div>對方要求重新開局，是否接受？</div>
+  <button id="restartYes">接受</button>
+  <button id="restartNo">拒絕</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("boardCanvas");
+  const ctx = canvas.getContext("2d");
+  const statusBox = document.getElementById("status");
+  const historyBox = document.getElementById("moves");
+  const resignPrompt = document.getElementById("resignPrompt");
+  const restartPrompt = document.getElementById("restartPrompt");
+  const btnResignYes = document.getElementById("resignYes");
+  const btnResignNo = document.getElementById("resignNo");
+  const btnRestartYes = document.getElementById("restartYes");
+  const btnRestartNo = document.getElementById("restartNo");
+
+  let board=[], selected=null, myColor="red", turn="red";
+  let moveHistory=[];
+  let pc, dc;
+  let animating=false;
+
+  const setStatus = (msg,color="#ddd") => { statusBox.textContent="狀態："+msg; statusBox.style.background=color; };
+  const addMoveHistory = text => { moveHistory.push(text); historyBox.innerHTML=moveHistory.join("<br>"); };
+
+  // --- 初始化棋盤 ---
+  const initBoard = () => {
+    board = [];
+    const add = (x,y,name,color)=>board.push({x,y,name,color});
+    // 黑方
+    ["車","馬","象","士","將","士","象","馬","車"].forEach((n,i)=>add(i,0,n,"black"));
+    add(1,2,"炮","black"); add(7,2,"炮","black");
+    [0,2,4,6,8].forEach(i=>add(i,3,"卒","black"));
+    // 紅方
+    ["車","馬","相","仕","帥","仕","相","馬","車"].forEach((n,i)=>add(i,9,n,"red"));
+    add(1,7,"炮","red"); add(7,7,"炮","red");
+    [0,2,4,6,8].forEach(i=>add(i,6,"兵","red"));
+  };
+
+  // --- 繪製棋盤與棋子 ---
+  const drawBoard = () => {
+    ctx.clearRect(0,0,450,500);
+
+    // 格線
+    ctx.strokeStyle="#000"; ctx.lineWidth=1;
+    for(let i=0;i<9;i++){ctx.beginPath(); ctx.moveTo(25+i*50,25); ctx.lineTo(25+i*50,475); ctx.stroke();}
+    for(let j=0;j<10;j++){ctx.beginPath(); ctx.moveTo(25,25+j*50); ctx.lineTo(425,25+j*50); ctx.stroke();}
+
+    // 楚河漢界橫線
+    ctx.beginPath(); ctx.moveTo(25,25+4*50); ctx.lineTo(425,25+4*50); ctx.stroke();
+
+    // 九宮格斜線
+    [[3,0],[3,7]].forEach(([col,rowStart])=>{
+      const rowEnd = rowStart===0?2:9;
+      ctx.beginPath(); ctx.moveTo(25+col*50,25+rowStart*50); ctx.lineTo(25+(col+2)*50,25+rowEnd*50); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(25+(col+2)*50,25+rowStart*50); ctx.lineTo(25+col*50,25+rowEnd*50); ctx.stroke();
+    });
+
+    // 楚河漢界文字
+    ctx.font="24px serif"; ctx.fillStyle="#000";
+    ctx.fillText("楚河",80,25+4.5*50); ctx.fillText("漢界",300,25+4.5*50);
+
+    // 棋子
+    board.forEach(p=>{
+      const cx=25+p.x*50,cy=25+p.y*50;
+      ctx.beginPath(); ctx.arc(cx,cy,20,0,Math.PI*2); ctx.fillStyle="#deb887"; ctx.fill();
+      ctx.strokeStyle=(selected===p?"#ff0":(p.color==="red"?"#c62828":"#000")); ctx.lineWidth=(selected===p?3:1.5); ctx.stroke();
+      ctx.fillStyle=(p.color==="red"?"#c62828":"#000"); ctx.font="20px serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(p.name,cx,cy);
+    });
+  };
+
+  // --- 工具函數 ---
+  const getPiece=(x,y)=>board.find(p=>p.x===x&&p.y===y);
+  const inPalace=(x,y,color)=>x>=3&&x<=5&&(color==="red"?y>=7&&y<=9:y>=0&&y<=2);
+  const isBlocked=(x1,y1,x2,y2)=>{if(x1===x2){for(let y=Math.min(y1,y2)+1;y<Math.max(y1,y2);y++) if(getPiece(x1,y)) return true;} if(y1===y2){for(let x=Math.min(x1,x2)+1;x<Math.max(x1,x2);x++) if(getPiece(x,y1)) return true;} return false;}
+  const isHorseBlocked=(x,y,dx,dy)=>{let bx=x+(Math.abs(dx)===2?dx/2:0),by=y+(Math.abs(dy)===2?dy/2:0);return getPiece(bx,by)?true:false;}
+  const isElephantBlocked=(x,y,dx,dy)=>getPiece(x+dx/2,y+dy/2)?true:false;
+  const countPiecesBetween=(x1,y1,x2,y2)=>{let count=0;if(x1===x2){for(let y=Math.min(y1,y2)+1;y<Math.max(y1,y2);y++) if(getPiece(x1,y)) count++;} else if(y1===y2){for(let x=Math.min(x1,x2)+1;x<Math.max(x1,x2);x++) if(getPiece(x,y1)) count++;} return count;}
+
+  const isValidMove=(piece,x,y)=>{
+    if(piece.color!==turn) return false;
+    const dx=x-piece.x, dy=y-piece.y;
+    const target=getPiece(x,y);
+    if(target && target.color===piece.color) return false;
+    switch(piece.name){
+      case "車": return (dx===0||dy===0)&&!isBlocked(piece.x,piece.y,x,y);
+      case "馬": return ((Math.abs(dx)===2&&Math.abs(dy)===1)||(Math.abs(dx)===1&&Math.abs(dy)===2))&&!isHorseBlocked(piece.x,piece.y,dx,dy);
+      case "象": case "相": return Math.abs(dx)===2&&Math.abs(dy)===2&&!isElephantBlocked(piece.x,piece.y,dx,dy)&&(piece.color==="red"?y>=5:y<=4);
+      case "士": case "仕": return Math.abs(dx)===1&&Math.abs(dy)===1&&inPalace(x,y,piece.color);
+      case "將": case "帥": return inPalace(x,y,piece.color)&&(Math.abs(dx)+Math.abs(dy)===1);
+      case "炮": if(dx===0||dy===0){const cnt=countPiecesBetween(piece.x,piece.y,x,y); return (!target&&cnt===0)||(target&&cnt===1);} return false;
+      case "兵": case "卒":
+        if(piece.color==="red"){if(dy>=0) return false; if(piece.y<=4){if(dy===0 && Math.abs(dx)===1) return true;} return dx===0;}
+        else{if(dy<=0) return false; if(piece.y>=5){if(dy===0 && Math.abs(dx)===1) return true;} return dx===0;}
+    }
+    return false;
+  };
+
+  // --- 棋子移動動畫 ---
+  const animateMove=(piece,toX,toY,target=null,callback)=>{
+    if(animating){if(callback) callback(); return;}
+    animating=true;
+    const startX=piece.x, startY=piece.y;
+    const steps=10; let step=0;
+    const deltaX=(toX-startX)/steps, deltaY=(toY-startY)/steps;
+    const anim=()=>{
+      if(step<steps){
+        piece.x=startX+deltaX*(step+1);
+        piece.y=startY+deltaY*(step+1);
+        drawBoard();
+        step++;
+        requestAnimationFrame(anim);
+      } else {
+        piece.x=toX; piece.y=toY;
+        if(target) board=board.filter(p=>p!==target);
+        drawBoard();
+        animating=false;
+        if(callback) callback();
+      }
+    };
+    anim();
+  };
+
+  canvas.addEventListener("click",e=>{
+    if(animating) return;
+    const rect=canvas.getBoundingClientRect();
+    const x=Math.round((e.clientX-rect.left-25)/50);
+    const y=Math.round((e.clientY-rect.top-25)/50);
+    const piece=getPiece(x,y);
+    if(piece && piece.color===myColor){selected=piece; drawBoard(); return;}
+    if(selected && isValidMove(selected,x,y)){
+      const fromX=selected.x, fromY=selected.y;
+      const target=getPiece(x,y);
+      const movingPiece=selected;
+      animateMove(movingPiece,x,y,target,()=>{
+        addMoveHistory(`${movingPiece.color} ${movingPiece.name} ${fromX},${fromY} → ${x},${y}`);
+        turn = (turn==="red"?"black":"red");
+        sendMove({fromX,fromY,toX:x,toY:y});
+        selected=null;
+        checkGameOver();
+      });
+    }
+  });
+
+  const checkGameOver=()=>{
+    const redKing=board.find(p=>p.name==="帥");
+    const blackKing=board.find(p=>p.name==="將");
+    if(!redKing){setStatus("黑方勝利!","#f44336"); sendGameOver("black");}
+    if(!blackKing){setStatus("紅方勝利!","#c62828"); sendGameOver("red");}
+  };
+
+  const sendGameOver=color=>{
+    if(dc && dc.readyState==="open") dc.send(JSON.stringify({type:"gameover", winner:color}));
+  };
+
+  // --- 投降 ---
+  document.getElementById("btnResign").onclick=()=>{resignPrompt.style.display="block";};
+  btnResignNo.onclick=()=>{resignPrompt.style.display="none";};
+  btnResignYes.onclick=()=>{
+    const winner=myColor==="red"?"black":"red";
+    setStatus(`${winner} 勝利!`,"#f44336");
+    if(dc && dc.readyState==="open") dc.send(JSON.stringify({type:"gameover", winner:winner}));
+    resignPrompt.style.display="none";
+  };
+
+  // --- 重新開局 ---
+  document.getElementById("btnRestart").onclick=()=>{
+    if(dc && dc.readyState==="open") dc.send(JSON.stringify({type:"restart_request"}));
+    resetBoard();
+  };
+  btnRestartYes.onclick=()=>{resetBoard(); restartPrompt.style.display="none";}
+  btnRestartNo.onclick=()=>{restartPrompt.style.display="none";}
+
+  const resetBoard=()=>{
+    initBoard(); drawBoard(); moveHistory=[]; historyBox.innerHTML=""; turn="red"; selected=null;
+    setStatus("新局開始","#03a9f4");
+  };
+
+  // --- WebRTC ---
+  const sendMove=data=>{
+    if(dc && dc.readyState==="open") dc.send(JSON.stringify({type:"move", data}));
+  };
+
+  const setupDataChannel=()=>{
+    dc.onopen=()=>setStatus("✅ 已連線，可開始對弈","lightgreen");
+    dc.onmessage=e=>{
+      try{
+        const msg=JSON.parse(e.data);
+        switch(msg.type){
+          case "move":
+            const m=msg.data;
+            const p=getPiece(m.fromX,m.fromY);
+            if(!p) return;
+            animateMove(p,m.toX,m.toY,getPiece(m.toX,m.toY),()=>{
+              addMoveHistory(`對方 ${p.name} ${m.fromX},${m.fromY} → ${m.toX},${m.toY}`);
+              turn = (turn==="red"?"black":"red");
+              checkGameOver();
+            });
+            break;
+          case "gameover":
+            setStatus(msg.winner==="red"?"紅方勝利!":"黑方勝利!","#f44336");
+            break;
+          case "restart_request":
+            restartPrompt.style.display="block";
+            break;
+        }
+      }catch(err){console.error(err);}
+    };
+  };
+
+  const initRTC=()=>{
+    pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+    pc.onicecandidate=e=>{ if(!e.candidate) document.getElementById("signal").value=JSON.stringify(pc.localDescription); };
+    pc.ondatachannel=e=>{ dc=e.channel; setupDataChannel(); };
+  };
+
+  document.getElementById("btnCreateOffer").onclick=async()=>{
+    initRTC();
+    dc=pc.createDataChannel("xq");
+    setupDataChannel();
+    resetBoard();
+    const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
+    setStatus("📡 房間建立，複製 Offer 給對方","#03a9f4");
+  };
+
+  document.getElementById("btnSetRemote").onclick=async()=>{
+    const data=JSON.parse(document.getElementById("signal").value);
+    if(!pc) initRTC();
+    await pc.setRemoteDescription(data);
+    if(data.type==="offer"){
+      dc=null;
+      const answer=await pc.createAnswer(); await pc.setLocalDescription(answer);
+      document.getElementById("signal").value=JSON.stringify(pc.localDescription);
+      setStatus("📡 已建立 Answer，請回傳給對方","#03a9f4");
+      myColor="black"; resetBoard();
+    } else setStatus("等待 DataChannel 開啟...","#ffc107");
+  };
+
+  resetBoard();
+})();
+</script>
+</body>
+</html>

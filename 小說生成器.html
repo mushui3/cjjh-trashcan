@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title></title>
+<style>
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: #fefefe;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 1rem 2rem;
+    color: #222;
+  }
+  h1 {
+    text-align: center;
+    font-size: 2.8rem;
+    margin-bottom: 1rem;
+  }
+  label, input, button {
+    font-size: 1.1rem;
+    margin: 0.5rem 0;
+  }
+  input {
+    width: 120px;
+    padding: 0.3rem 0.5rem;
+  }
+  button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1.2rem;
+    cursor: pointer;
+  }
+  button:hover {
+    background-color: #0056b3;
+  }
+  #novel {
+    white-space: pre-wrap;
+    line-height: 1.8;
+    font-size: 1.05rem;
+    margin-top: 2rem;
+    border-top: 1px solid #ccc;
+    padding-top: 1.5rem;
+  }
+</style>
+</head>
+<body>
+<h1></h1>
+<label for="length">幾字？</label>
+<input type="number" id="length" value="2000" min="300" max="200000" />
+<button onclick="generateNovel()">生成</button>
+<div id="novel"></div>
+
+<script>
+const characters = ["丁大又", "梁實秋", "氚圤", "不各泗大仙", "SWROW", "沈復賴蝦尛", "DIO-GPT"];
+const places = ["居仁附幼", "外操場", "火星基地", "不各泗虐後的廢墟"];
+const goals = ["尋找失落的不各", "變成一席有夢想的床單"];
+const actions = ["突然癲癇", "發現一本奇怪的SWROW傳"];
+const twists = ["結果那其實是一場夢", "但這一切只是AI測試的一部分"];
+const weirdEvents = ["天空突然下起泗雨", "冰箱裡藏著神秘的漢堡"];
+const chapterTitles = ["SWROW傳", "火星的失眠之夜"];
+const emotionalEndings = [
+  "或許，人生就像這杯冷掉的泗，黏稠帶臭，但最後還是得進ICU。"
+];
+
+const sentenceTemplates = {
+  opening: [
+    (c,p,g,a,t,w) => `${c}來到了${p}，只為了${g}，沒想到${a}，結果竟是${t}。然後${w}悄然發生。\n`,
+    (c,p,g,a,t,w) => `在${p}的某個角落，${c}一邊思考如何${g}，一邊${a}。然而，${t}悄悄逼近，並伴隨著${w}。\n`
+  ],
+  middle: [
+    (c,p,g,a,t,w) => `每次${c}試圖${g}，總會在${p}被迫${a}。重複五百次後，${t}發生了，而${w}成了唯一的出口。\n`,
+    (c,p,g,a,t,w) => `據說當${c}在${p}完成${g}後，整個宇宙都震動了。他/她${a}時甚至打開了${w}的次元門。這一切讓${t}毫無懸念地發生。\n`,
+    (c,p,g,a,t,w) => `${c}正在${p}。突然${a}。然後……${w}出現，一切都${t}。\n`,
+    (c,p,g,a,t,w) => `原本他只是想${g}。結果${a}。然後在${p}爆發${w}，這導致了${t}。\n`,
+    (c,p,g,a,t,w) => `某天晚上，${c}在${p}發現一張泛黃的紙條，上面寫著「${g}」。他照著做了，結果${a}，接著${w}降臨。從那刻開始，${t}一再重演。\n`,
+    (c,p,g,a,t,w) => `沒人能解釋為什麼${p}會出現${w}。但${c}明白，這與他/她的${g}有關。因為他/她曾${a}，並親歷${t}的降臨。\n`,
+    (c,p,g,a,t,w) => `${c}曾說過：「${g}其實就是另一種${a}。」這句話在${p}成為真理，直到${w}撕裂了空間，證明${t}才是結論。\n`,
+    (c,p,g,a,t,w) => `人生到底是${g}，還是${a}？${c}坐在${p}苦思，忽然聽見${w}在耳邊低語：「${t}才是真相。」\n`,
+    (c,p,g,a,t,w) => `${c}大吼一聲：「${g}！！！」然後用力${a}。${p}整個爆炸了，世界因此${t}，而天上居然${w}。\n`,
+    (c,p,g,a,t,w) => `${c}陷入了無盡的輪迴：${g} → ${a} → ${t} → ${w} → 又回到${p}。直到現在，他/她還在迴圈中。\n`,
+    (c,p,g,a,t,w) => `${c}忽然意識到：${g}也許根本沒意義。但在${p}，他/她還是${a}。如果${t}成立，那${w}該怎麼辦？\n`,
+    (c,p,g,a,t,w) => `為什麼${p}裡會有${w}？這是${c}長年追尋${g}後的副作用？還是${a}引發的連鎖反應？總之，${t}正在逼近。\n`,
+    (c,p,g,a,t,w) => `${c}思緒萬千，像${w}一樣混亂。他/她在${p}回憶起${g}的初衷，卻因為${a}差點崩潰。這一切，是不是就是${t}的證明？\n`
+  ],
+  ending: [
+    (c,p,g,a,t,w) => `${c}望著${p}遠方的天空，心中只剩一句話：「${g}值得嗎？」他想起${a}時的痛苦，還有${t}的結果。至於${w}，他不想再提。\n`,
+    (c,p,g,a,t,w) => `最後，${c}什麼也沒說。${p}的風帶走了他/她的聲音。他/她的${g}無法完成，只留下${a}的痕跡與${w}的餘音。然後，一切如${t}般沉靜。\n`
+  ]
+};
+
+function getRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function decideChapterCount(totalLength) {
+  return Math.max(3, Math.min(10, Math.floor(totalLength / 500)));
+}
+
+function generateParagraph(templateType, targetLength) {
+  let content = "";
+  const templates = sentenceTemplates[templateType];
+  const sentenceCount = Math.floor(Math.random() * 10) + 1;
+  for (let i = 0; i < sentenceCount; i++) {
+    const sentence = getRandom(templates)(
+      getRandom(characters),
+      getRandom(places),
+      getRandom(goals),
+      getRandom(actions),
+      getRandom(twists),
+      getRandom(weirdEvents)
+    );
+    if (content.length + sentence.length > targetLength) break;
+    content += sentence;
+  }
+  return content;
+}
+
+function generateNovel() {
+  const targetLength = parseInt(document.getElementById("length").value);
+  if (isNaN(targetLength) || targetLength < 300) {
+    alert("請輸入 300 以上的字數");
+    return;
+  }
+  const chaptersCount = decideChapterCount(targetLength);
+  const baseLength = Math.floor(targetLength / chaptersCount);
+  let novelText = "";
+
+  for (let i = 0; i < chaptersCount; i++) {
+    novelText += `\n\n=== ${getRandom(chapterTitles)} ===\n\n`;
+    if (i === 0) {
+      novelText += generateParagraph("opening", baseLength);
+    } else if (i === chaptersCount - 1) {
+      novelText += generateParagraph("ending", baseLength);
+      if (Math.random() < 0.7) {
+        novelText += `\n【】${getRandom(emotionalEndings)}\n`;
+      }
+    } else {
+      novelText += generateParagraph("middle", baseLength);
+    }
+  }
+
+  document.getElementById("novel").innerText = novelText.trim();
+}
+</script>
+</body>
+</html>

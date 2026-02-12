@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>小恐龍跑跑（長方形版）</title>
+<style>
+  body { margin:0; background:#f0f0f0; display:flex; justify-content:center; align-items:center; height:100vh;}
+  canvas { background:#fff; border:1px solid #333; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="200"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // 基本參數
+  const groundY = 160;
+  const dino = { x: 50, y: groundY - 40, width: 40, height: 40, vy: 0, jumping: false, jumpPower: -12, gravity: 0.7, scale: 1 };
+  let obstacles = [];
+  let props = [];
+  let speed = 5;
+  const maxSpeed = 15;
+  let frames = 0;
+  let score = 0;
+  let wingLizardStart = 20 * 60; // 20秒，60fps
+  let propActive = null; // {type, timer}
+  let noJumpTimer = 0;
+
+  // 生成障礙物（仙人掌 or 翼龍）
+  function generateObstacle() {
+    const timeSec = frames / 60;
+    const type = timeSec >= 20 ? (Math.random() < 0.3 ? 'wingLizard' : 'cactus') : 'cactus';
+    if (type === 'cactus') {
+      // 仙人掌大小不同，寬40~60，高30~35，不能太高
+      const width = 40 + Math.random() * 20;
+      const height = 30 + Math.random() * 5;
+      obstacles.push({
+        x: canvas.width,
+        y: groundY - height,
+        width,
+        height,
+        type,
+      });
+    } else {
+      // 翼龍固定尺寸，長方形 + 標籤
+      obstacles.push({
+        x: canvas.width,
+        y: groundY - 80,
+        width: 60,
+        height: 40,
+        type,
+      });
+    }
+  }
+
+  // 生成道具（正方形）
+  function generateProp() {
+    const types = ['fly', 'big', 'small', 'noJump'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const size = 30;
+    props.push({
+      x: canvas.width,
+      y: groundY - size - (Math.random() * 60), // 空中或地面不等
+      width: size,
+      height: size,
+      type,
+    });
+  }
+
+  // 碰撞檢測 (長方形)
+  function rectCollision(a, b) {
+    return a.x < b.x + b.width &&
+           a.x + a.width > b.x &&
+           a.y < b.y + b.height &&
+           a.y + a.height > b.y;
+  }
+
+  function resetProp() {
+    propActive = null;
+    dino.scale = 1;
+    noJumpTimer = 0;
+  }
+
+  function update() {
+    frames++;
+    // 加速，最高15
+    if (speed < maxSpeed) speed += 0.0015;
+
+    // 每隔一定時間生成障礙
+    if (frames % Math.floor(90 - speed * 3) === 0) generateObstacle();
+
+    // 道具隨機生成，約每10秒一次
+    if (frames % 600 === 0) generateProp();
+
+    // 小恐龍跳躍物理
+    if (!noJumpTimer) {
+      if (dino.jumping) {
+        dino.vy += dino.gravity;
+        dino.y += dino.vy;
+        if (dino.y >= groundY - dino.height * dino.scale) {
+          dino.y = groundY - dino.height * dino.scale;
+          dino.jumping = false;
+          dino.vy = 0;
+        }
+      }
+    } else {
+      noJumpTimer--;
+    }
+
+    // 移動障礙物 & 道具
+    obstacles.forEach(o => {
+      o.x -= speed;
+    });
+    props.forEach(p => {
+      p.x -= speed;
+    });
+
+    // 清除畫面外物件
+    obstacles = obstacles.filter(o => o.x + o.width > 0);
+    props = props.filter(p => p.x + p.width > 0);
+
+    // 碰撞檢測
+    for (const o of obstacles) {
+      let hitboxDino = { x: dino.x, y: dino.y, width: dino.width * dino.scale, height: dino.height * dino.scale };
+      let hitboxObs = { x: o.x, y: o.y, width: o.width, height: o.height };
+      if (rectCollision(hitboxDino, hitboxObs)) {
+        if (propActive && propActive.type === 'fly') {
+          // 飛行狀態無敵碰撞
+          continue;
+        } else {
+          alert('遊戲結束！分數: ' + Math.floor(score));
+          document.location.reload();
+          return;
+        }
+      }
+    }
+
+    // 道具撿取
+    for (let i = 0; i < props.length; i++) {
+      let p = props[i];
+      let hitboxDino = { x: dino.x, y: dino.y, width: dino.width * dino.scale, height: dino.height * dino.scale };
+      let hitboxProp = { x: p.x, y: p.y, width: p.width, height: p.height };
+      if (rectCollision(hitboxDino, hitboxProp)) {
+        propActive = { type: p.type, timer: 180 }; // 3秒 = 180 frames
+        if (p.type === 'big') dino.scale = 1.8;
+        if (p.type === 'small') dino.scale = 0.5;
+        if (p.type === 'noJump') noJumpTimer = 180;
+        props.splice(i,1);
+        break;
+      }
+    }
+
+    // 道具計時
+    if (propActive) {
+      propActive.timer--;
+      if (propActive.timer <= 0) resetProp();
+    }
+
+    // 分數加速
+    score += speed / 10;
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 地板
+    ctx.fillStyle = '#555';
+    ctx.fillRect(0, groundY, canvas.width, 5);
+
+    // 小恐龍
+    ctx.fillStyle = '#0077cc';
+    ctx.fillRect(dino.x, dino.y, dino.width * dino.scale, dino.height * dino.scale);
+
+    // 障礙物
+    obstacles.forEach(o => {
+      ctx.fillStyle = o.type === 'cactus' ? '#228833' : '#aa5500';
+      ctx.fillRect(o.x, o.y, o.width, o.height);
+      if (o.type === 'wingLizard') {
+        ctx.fillStyle = '#000';
+        ctx.font = '14px Arial';
+        ctx.fillText('翼龍', o.x + 5, o.y + 25);
+      }
+    });
+
+    // 道具
+    props.forEach(p => {
+      let color;
+      switch(p.type) {
+        case 'fly': color = '#ff0'; break;
+        case 'big': color = '#f0a'; break;
+        case 'small': color = '#0af'; break;
+        case 'noJump': color = '#f00'; break;
+      }
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x, p.y, p.width, p.height);
+    });
+
+    // 顯示分數
+    ctx.fillStyle = '#333';
+    ctx.font = '20px Arial';
+    ctx.fillText('分數: ' + Math.floor(score), 10, 30);
+
+    // 顯示道具狀態
+    if(propActive) {
+      ctx.fillText('道具：' + propActive.type + ' (' + Math.ceil(propActive.timer/60) + '秒)', 10, 60);
+    }
+
+    // 跳躍限制提示
+    if(noJumpTimer) {
+      ctx.fillStyle = 'red';
+      ctx.font = '18px Arial';
+      ctx.fillText('不能跳！', 700, 30);
+    }
+  }
+
+  // 控制跳躍
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      if (!dino.jumping && noJumpTimer === 0) {
+        dino.vy = dino.jumpPower;
+        dino.jumping = true;
+      }
+    }
+  });
+
+  update();
+})();
+</script>
+</body>
+</html>

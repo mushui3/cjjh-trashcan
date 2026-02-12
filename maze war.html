@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Maze War</title>
+    <style>
+        body { margin: 0; background-color: #000; overflow: hidden; }
+        canvas { display: block; }
+        #overlay {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none; /* 允許滑鼠事件穿透 */
+        }
+        #hud {
+            position: absolute;
+            bottom: 10px; right: 10px;
+            color: white;
+            font-family: sans-serif;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+        #bullet-indicator {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 10px; height: 10px;
+            background: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: none; /* 預設隱藏 */
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+        <div id="bullet-indicator"></div>
+        <div id="hud">
+            HP: <span id="playerHP">100</span> | Score: <span id="score">0</span>
+        </div>
+    </div>
+
+    <script>
+        // 遊戲設定
+        const CANVAS_WIDTH = 800;
+        const CANVAS_HEIGHT = 600;
+        const TILE_SIZE = 64; // 迷宮格子大小
+        const MAP_WIDTH = 10;
+        const MAP_HEIGHT = 10;
+        const FOV = Math.PI / 3; // 視野角度 60度
+        const NUM_RAYS = CANVAS_WIDTH;
+        const MAX_DEPTH = 10; // 最大可視距離（以格子為單位）
+
+        // 迷宮地圖 (1=牆, 0=通道)
+        const MAP = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 1, 0, 0, 0, 0, 1, 0, 1],
+            [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+            [1, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+            [1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 1, 1, 1, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ];
+
+        // 玩家狀態
+        let player = {
+            x: 1.5 * TILE_SIZE,
+            y: 1.5 * TILE_SIZE,
+            angle: 0,
+            speed: 3,
+            rotSpeed: 0.05,
+            hp: 100
+        };
+
+        // 敵人 (簡單的機器人)
+        let enemy = {
+            x: 8.5 * TILE_SIZE,
+            y: 8.5 * TILE_SIZE,
+            size: 20,
+            color: 'red',
+            hp: 50,
+            moveSpeed: 1.5,
+            active: true,
+            lastShot: 0,
+            shootInterval: 2000 // 2秒
+        };
+
+        // 遊戲元素
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        // HUD 元素
+        const playerHPElement = document.getElementById('playerHP');
+        const scoreElement = document.getElementById('score');
+        const bulletIndicator = document.getElementById('bullet-indicator');
+
+        // 遊戲狀態
+        let keys = {};
+        let score = 0;
+        let bullets = []; // 玩家射出的子彈
+        let enemyBullets = []; // 敵人射出的子彈
+        let lastBulletTime = 0;
+        const SHOOT_DELAY = 300; // 射擊延遲 ms
+
+        // 事件監聽
+        document.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        document.addEventListener('keyup', (e) => { keys[e.key] = false; });
+        document.addEventListener('mousedown', shoot);
+
+        // --- 核心函數 ---
+
+        /**
+         * 光線投射渲染函數
+         */
+        function raycast() {
+            // 清空畫面
+            // 天空 (上半部)
+            ctx.fillStyle = '#7a7a7a';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+            // 地板 (下半部)
+            ctx.fillStyle = '#444444';
+            ctx.fillRect(0, CANVAS_HEIGHT / 2, CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+
+            for (let ray = 0; ray < NUM_RAYS; ray++) {
+                // 計算射線角度
+                let rayAngle = (player.angle - FOV / 2) + (ray / NUM_RAYS) * FOV;
+
+                // 修正角度到 0 到 2*PI
+                rayAngle = rayAngle % (2 * Math.PI);
+                if (rayAngle < 0) rayAngle += 2 * Math.PI;
+
+                let distToWall = 0;
+                let hitWall = false;
+                let wallHitX = 0; // 擊中牆面的 X/Y 座標
+                let wallHitY = 0;
+
+                let eyeX = Math.sin(rayAngle); // 射線的方向向量 X
+                let eyeY = Math.cos(rayAngle); // 射線的方向向量 Y
+
+                // 逐步增加距離，尋找牆壁
+                while (!hitWall && distToWall < MAX_DEPTH) {
+                    distToWall += 0.01; // 以 0.01 為步長
+                    let testX = player.x / TILE_SIZE + distToWall * eyeX;
+                    let testY = player.y / TILE_SIZE + distToWall * eyeY;
+
+                    // 檢查是否在地圖邊界外
+                    if (testX < 0 || testX >= MAP_WIDTH || testY < 0 || testY >= MAP_HEIGHT) {
+                        hitWall = true;
+                        distToWall = MAX_DEPTH;
+                    } else {
+                        // 檢查是否擊中牆壁 (地圖值為 1)
+                        if (MAP[Math.floor(testY)][Math.floor(testX)] === 1) {
+                            hitWall = true;
+                            wallHitX = testX;
+                            wallHitY = testY;
+                        }
+                    }
+                }
+
+                // 魚眼修正 (消除圓形扭曲)
+                let perpDist = distToWall * Math.cos(rayAngle - player.angle);
+
+                // 根據距離計算牆壁的高度
+                const wallHeight = CANVAS_HEIGHT / (perpDist + 0.0001);
+
+                // 決定牆壁的起始和結束 Y 座標
+                const wallStartY = CANVAS_HEIGHT / 2 - wallHeight / 2;
+                const wallEndY = CANVAS_HEIGHT / 2 + wallHeight / 2;
+
+                // 牆壁顏色：根據距離和方向進行陰影處理
+                let shade = Math.max(0, 1 - perpDist / MAX_DEPTH);
+                let r = Math.floor(255 * shade);
+                let g = Math.floor(255 * shade);
+                let b = Math.floor(255 * shade);
+                let wallColor = `rgb(${r}, ${g}, ${b})`;
+
+                // 繪製牆壁
+                ctx.fillStyle = wallColor;
+                ctx.fillRect(ray, wallStartY, 1, wallEndY - wallStartY);
+            }
+        }
+
+        /**
+         * 繪製敵人 (使用簡單的精靈圖形)
+         * 敵人只在視野內且沒有牆壁阻擋時繪製
+         */
+        function drawEnemy() {
+            if (!enemy.active) return;
+
+            // 1. 計算敵人在玩家視角中的相對位置
+            const dx = enemy.x - player.x;
+            const dy = enemy.y - player.y;
+
+            // 距離 (不進行魚眼修正，因為它是物體)
+            let distance = Math.sqrt(dx * dx + dy * dy) / TILE_SIZE;
+
+            // 角度 (敵人相對於玩家的角度)
+            let angleToEnemy = Math.atan2(dx, dy); // 注意: 這裡使用 (dx, dy) 才能匹配 raycasting 的角度系統
+
+            // 修正角度差
+            let angleDiff = angleToEnemy - player.angle;
+            // 修正到 -PI 到 PI
+            if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+            if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+            // 檢查是否在視野內
+            if (angleDiff >= -FOV / 2 && angleDiff <= FOV / 2 && distance > 0.5) {
+                // 檢查是否有牆壁阻擋
+                let blocked = false;
+                let testAngle = player.angle + angleDiff; // 投射檢查射線
+
+                let rayX = Math.sin(testAngle);
+                let rayY = Math.cos(testAngle);
+                let testDepth = 0;
+                while (testDepth < distance) {
+                    testDepth += 0.05;
+                    let testX = player.x / TILE_SIZE + testDepth * rayX;
+                    let testY = player.y / TILE_SIZE + testDepth * rayY;
+                    if (MAP[Math.floor(testY)][Math.floor(testX)] === 1) {
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                if (!blocked) {
+                    // 2. 投影到螢幕座標
+                    const screenX = (angleDiff + FOV / 2) * CANVAS_WIDTH / FOV;
+
+                    // 3. 計算敵人的繪製大小
+                    const spriteHeight = CANVAS_HEIGHT / (distance + 0.0001);
+                    const spriteWidth = spriteHeight * (enemy.size / TILE_SIZE); // 保持比例
+
+                    // 4. 計算繪製位置
+                    const drawY = CANVAS_HEIGHT / 2 - spriteHeight / 2;
+                    const drawX = screenX - spriteWidth / 2;
+
+                    // 5. 繪製敵人
+                    ctx.fillStyle = enemy.color;
+                    // 使用簡單的圓形或矩形代表敵人
+                    ctx.fillRect(drawX, drawY, spriteWidth, spriteHeight);
+
+                    // 繪製敵人的 HP 條
+                    const hpBarWidth = spriteWidth;
+                    const hpBarHeight = 5;
+                    const hpRatio = enemy.hp / 50; // 假設敵人最大HP是50
+
+                    ctx.fillStyle = 'black'; // 背景
+                    ctx.fillRect(drawX, drawY - hpBarHeight - 2, hpBarWidth, hpBarHeight);
+                    ctx.fillStyle = hpRatio > 0.2 ? 'lime' : 'yellow'; // 綠色/黃色
+                    ctx.fillRect(drawX, drawY - hpBarHeight - 2, hpBarWidth * hpRatio, hpBarHeight);
+                }
+            }
+        }
+
+        /**
+         * 繪製子彈
+         */
+        function drawBullets(bulletArray, color) {
+            bulletArray.forEach(bullet => {
+                const dx = bullet.x - player.x;
+                const dy = bullet.y - player.y;
+                let distance = Math.sqrt(dx * dx + dy * dy) / TILE_SIZE;
+                let angleToBullet = Math.atan2(dx, dy);
+
+                let angleDiff = angleToBullet - player.angle;
+                if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+                if (angleDiff >= -FOV / 2 && angleDiff <= FOV / 2 && distance > 0.1) {
+                    const screenX = (angleDiff + FOV / 2) * CANVAS_WIDTH / FOV;
+                    const spriteHeight = CANVAS_HEIGHT / (distance + 0.0001) / 5;
+                    const spriteWidth = spriteHeight;
+                    const drawY = CANVAS_HEIGHT / 2 - spriteHeight / 2;
+                    const drawX = screenX - spriteWidth / 2;
+
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(drawX + spriteWidth / 2, drawY + spriteHeight / 2, spriteWidth / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        /**
+         * 玩家射擊邏輯
+         */
+        function shoot(e) {
+            const now = Date.now();
+            if (now - lastBulletTime < SHOOT_DELAY) return;
+
+            // 顯示子彈提示
+            bulletIndicator.style.display = 'block';
+            setTimeout(() => { bulletIndicator.style.display = 'none'; }, 50);
+
+            // 創建子彈
+            bullets.push({
+                x: player.x,
+                y: player.y,
+                angle: player.angle,
+                speed: 15,
+                size: 5,
+                damage: 10
+            });
+
+            lastBulletTime = now;
+        }
+
+        /**
+         * 更新子彈位置和碰撞檢測
+         */
+        function updateBullets() {
+            bullets = bullets.filter(bullet => {
+                bullet.x += Math.sin(bullet.angle) * bullet.speed;
+                bullet.y += Math.cos(bullet.angle) * bullet.speed;
+
+                // 檢查是否擊中牆壁
+                const mapX = Math.floor(bullet.x / TILE_SIZE);
+                const mapY = Math.floor(bullet.y / TILE_SIZE);
+                if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT || MAP[mapY][mapX] === 1) {
+                    return false; // 擊中牆壁，移除子彈
+                }
+
+                // 檢查是否擊中敵人
+                if (enemy.active) {
+                    const distToEnemy = Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y);
+                    if (distToEnemy < enemy.size / 2) {
+                        enemy.hp -= bullet.damage;
+                        score += 10;
+                        if (enemy.hp <= 0) {
+                            enemy.active = false;
+                            score += 100; // 擊殺獎勵
+                        }
+                        return false; // 擊中敵人，移除子彈
+                    }
+                }
+
+                return true; // 繼續存在
+            });
+
+            // 敵人子彈的碰撞檢測
+            enemyBullets = enemyBullets.filter(bullet => {
+                bullet.x += Math.sin(bullet.angle) * bullet.speed;
+                bullet.y += Math.cos(bullet.angle) * bullet.speed;
+
+                // 檢查是否擊中牆壁
+                const mapX = Math.floor(bullet.x / TILE_SIZE);
+                const mapY = Math.floor(bullet.y / TILE_SIZE);
+                if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT || MAP[mapY][mapX] === 1) {
+                    return false; // 擊中牆壁，移除子彈
+                }
+
+                // 檢查是否擊中玩家
+                const distToPlayer = Math.hypot(bullet.x - player.x, bullet.y - player.y);
+                if (distToPlayer < 10) { // 玩家碰撞半徑
+                    player.hp -= bullet.damage;
+                    if (player.hp <= 0) {
+                        alert('Game Over! Your Score: ' + score);
+                        document.location.reload(); // 簡單的重新載入遊戲
+                    }
+                    return false; // 擊中玩家，移除子彈
+                }
+
+                return true;
+            });
+        }
+
+        /**
+         * 玩家移動和碰撞檢測
+         */
+        function updatePlayerMovement() {
+            let dx = 0;
+            let dy = 0;
+
+            // 旋轉
+            if (keys['ArrowLeft'] || keys['a']) player.angle -= player.rotSpeed;
+            if (keys['ArrowRight'] || keys['d']) player.angle += player.rotSpeed;
+
+            // 前進/後退
+            if (keys['ArrowUp'] || keys['w']) {
+                dx = Math.sin(player.angle) * player.speed;
+                dy = Math.cos(player.angle) * player.speed;
+            }
+            if (keys['ArrowDown'] || keys['s']) {
+                dx = -Math.sin(player.angle) * player.speed;
+                dy = -Math.cos(player.angle) * player.speed;
+            }
+
+            // 檢查新的 X 座標是否有牆壁
+            let newX = player.x + dx;
+            let testMapX = Math.floor(newX / TILE_SIZE);
+            let testMapY = Math.floor(player.y / TILE_SIZE);
+            if (MAP[testMapY][testMapX] === 0) {
+                player.x = newX;
+            }
+
+            // 檢查新的 Y 座標是否有牆壁
+            let newY = player.y + dy;
+            testMapX = Math.floor(player.x / TILE_SIZE);
+            testMapY = Math.floor(newY / TILE_SIZE);
+            if (MAP[testMapY][testMapX] === 0) {
+                player.y = newY;
+            }
+
+            // 更新 HUD
+            playerHPElement.textContent = Math.max(0, player.hp);
+            scoreElement.textContent = score;
+        }
+
+        /**
+         * 簡單的敵人 AI
+         */
+        function updateEnemyAI() {
+            if (!enemy.active) return;
+
+            const now = Date.now();
+
+            // 1. 敵人追蹤和移動
+            let angleToPlayer = Math.atan2(player.x - enemy.x, player.y - enemy.y);
+            enemy.x += Math.sin(angleToPlayer) * enemy.moveSpeed;
+            enemy.y += Math.cos(angleToPlayer) * enemy.moveSpeed;
+
+            // 簡單的牆壁碰撞檢測和修正（防止穿牆）
+            const mapX = Math.floor(enemy.x / TILE_SIZE);
+            const mapY = Math.floor(enemy.y / TILE_SIZE);
+
+            if (MAP[mapY][mapX] === 1) {
+                // 碰撞後隨機移動 (簡化處理)
+                enemy.x = mapX * TILE_SIZE + TILE_SIZE / 2;
+                enemy.y = mapY * TILE_SIZE + TILE_SIZE / 2;
+                enemy.x += (Math.random() > 0.5 ? 1 : -1) * TILE_SIZE * 0.4;
+                enemy.y += (Math.random() > 0.5 ? 1 : -1) * TILE_SIZE * 0.4;
+            }
+
+            // 2. 敵人射擊 (如果玩家在視野內)
+            const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y) / TILE_SIZE;
+
+            // 檢查是否有牆壁阻擋
+            let blocked = false;
+            let rayX = Math.sin(angleToPlayer);
+            let rayY = Math.cos(angleToPlayer);
+            let testDepth = 0;
+            while (testDepth < distToPlayer) {
+                testDepth += 0.05;
+                let testX = enemy.x / TILE_SIZE + testDepth * rayX;
+                let testY = enemy.y / TILE_SIZE + testDepth * rayY;
+                if (MAP[Math.floor(testY)][Math.floor(testX)] === 1) {
+                    blocked = true;
+                    break;
+                }
+            }
+
+            if (!blocked && distToPlayer < MAX_DEPTH / 2 && now - enemy.lastShot > enemy.shootInterval) {
+                // 敵人射擊
+                enemyBullets.push({
+                    x: enemy.x,
+                    y: enemy.y,
+                    angle: angleToPlayer, // 直接射向玩家
+                    speed: 10,
+  
+                  size: 5,
+                    damage: 5
+                });
+                enemy.lastShot = now;
+            }
+        }
+
+
+        // --- 主遊戲迴圈 ---
+
+        function gameLoop() {
+            updatePlayerMovement();
+            updateEnemyAI();
+            updateBullets();
+            raycast();
+            drawEnemy();
+            drawBullets(bullets, 'yellow'); // 玩家子彈
+            drawBullets(enemyBullets, 'red'); // 敵人子彈
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 啟動遊戲
+        gameLoop();
+    </script>
+</body>
+</html>

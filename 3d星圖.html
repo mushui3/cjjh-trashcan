@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>3D 星圖 - 圓球模型檢視器</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 設置背景和全屏顯示 */
+        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        
+        /* 頂部資訊和搜尋區塊的通用樣式 */
+        #info, #search-container {
+            position: absolute;
+            z-index: 100;
+            text-shadow: 1px 1px 2px #000000;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(5px); /* 輕微模糊背景 */
+        }
+        
+        #info {
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #ffffff;
+            font-size: 14px;
+            border-radius: 8px;
+        }
+
+        #search-container {
+            top: 10px;
+            right: 10px;
+            padding: 8px;
+            background-color: rgba(17, 24, 39, 0.8); /* gray-900 with opacity */
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 確保全屏響應式 */
+        #container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 恆星資訊固定面板樣式 (取代舊的 star-popup) */
+        #info-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 350px; /* 固定寬度 */
+            height: 100vh;
+            z-index: 200;
+            background-color: rgba(17, 24, 39, 0.95); /* 深色半透明背景 */
+            color: #ffffff;
+            padding: 20px;
+            box-shadow: -4px 0 10px rgba(0, 0, 0, 0.5);
+            transform: translateX(100%); /* 初始狀態：完全隱藏在右側 */
+            transition: transform 0.3s ease-in-out;
+            overflow-y: auto; /* 啟用垂直滾動 */
+        }
+
+        #info-panel.visible {
+            transform: translateX(0); /* 顯示狀態：滑入視圖 */
+        }
+
+        /* 搜尋反饋訊息樣式 */
+        #search-feedback {
+            position: absolute;
+            top: 65px;
+            right: 10px;
+            z-index: 100;
+            transition: opacity 0.3s ease-in-out;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            color: white;
+            opacity: 0;
+        }
+        
+        @media (max-width: 640px) {
+            #info-panel {
+                width: 90%; /* 在小螢幕上使用更寬的比例 */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container"></div>
+    
+    <div id="info">
+        3D 星圖 | 拖曳滑鼠左鍵環顧 | 滾動滾輪縮放 | 點擊恆星圓球顯示資訊
+    </div>
+    
+    <!-- 搜尋區塊 -->
+    <div id="search-container">
+        <input type="text" id="star-search-input" placeholder="輸入恆星名稱 (e.g., Sol System)" 
+               class="p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48 sm:w-64 text-sm">
+        <button id="search-button" 
+                class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 active:scale-95">
+            搜尋/前往
+        </button>
+    </div>
+
+    <!-- 搜尋結果/錯誤訊息 -->
+    <div id="search-feedback"></div>
+
+    <!-- 恆星資訊固定面板 (Info Panel) -->
+    <div id="info-panel">
+        <h3 id="popup-title" class="text-xl font-extrabold text-yellow-300 mb-3 border-b border-gray-700 pb-1"></h3>
+        <table class="text-sm w-full leading-relaxed mb-3">
+            <tr><td class="pr-4 font-semibold text-gray-400">系統名稱:</td><td id="popup-name" class="text-white font-bold"></td></tr>
+            <tr><td class="pr-4 font-semibold text-gray-400">政權:</td><td id="popup-faction" class="font-bold"></td></tr>
+            <tr><td class="pr-4 font-semibold text-gray-400">光譜類型:</td><td id="popup-spec" class="text-yellow-200"></td></tr>
+            <tr><td class="pr-4 font-semibold text-gray-400">光度:</td><td id="popup-lum" class="text-white"></td></tr>
+        </table>
+        
+        <h4 class="text-sm font-semibold text-gray-400 border-b border-gray-700 pb-1 mt-3">行星列表:</h4>
+        <!-- 行星列表容器已經設置為可滾動，但因為面板本身設置了 overflow-y: auto，所以不需要單獨設置行星列表容器的最大高度 -->
+        <div id="popup-planets-list" class="mt-2 pr-2">
+            <!-- Dynamic planet list goes here -->
+        </div>
+
+        <button onclick="hideStarInfo()" class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg text-sm transition duration-150">關閉</button>
+    </div>
+
+    <!-- 載入 Three.js 庫 (用於 3D 渲染) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- 載入 OrbitControls (用於滑鼠互動控制) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // ----------------------------------------------------
+        // 1. **數據與配置**
+        // ----------------------------------------------------
+
+        // 恆星光譜類型與顏色的映射 (O, B, A, F, G, K, M)
+        const SPECTRAL_COLORS = {
+            'O': 0x66aaff, // 藍色巨星
+            'B': 0xaaddff, // 藍白星
+            'A': 0xffffff, // 白色 (天狼星)
+            'F': 0xffffe8, // 黃白星
+            'G': 0xffe8a1, // 黃色 (太陽)
+            'K': 0xffb555, // 橙色
+            'M': 0xff8b3d  // 紅色矮星
+        };
+        const GALAXY_RADIUS = 500; 
+        
+        // 新增政權顏色配置
+        const FACTION_COLORS = {
+            'Galactic Federation': 0x00FF00,      // 綠色
+            'Xeno Dominion': 0xFF0000,           // 紅色
+            'Independent Worlds': 0xFFFF00,      // 黃色
+            'Neutral Zone': 0xAAAAAA             // 灰色
+        };
+
+        // 您的結構化恆星數據 (已更新為包含 'faction' 和結構化的 'planets' 陣列)
+        const rawStarData = [
+            // {x, y, z, name (系統名稱), lum (太陽光度), spec (光譜), faction (政權), planets (行星陣列)}
+            {x: 100, y: 50, z: -200, name: 'Sol System', lum: 1.0, spec: 'G', faction: 'Galactic Federation', 
+                planets: [
+                    {name: 'Mercury', isHabitable: false},
+                    {name: 'Venus', isHabitable: false},
+                    {name: 'Earth', isHabitable: true, population: 7890123456},
+                    {name: 'Mars', isHabitable: false},
+                    {name: 'Jupiter', isHabitable: false}
+                ]
+            },
+            {x: -150, y: 80, z: 10, name: 'Vega', lum: 50.0, spec: 'A', faction: 'Independent Worlds', 
+                planets: [
+                    {name: 'Vega I', isHabitable: false},
+                    {name: 'Vega II', isHabitable: true, population: 5000000},
+                    {name: 'Vega III', isHabitable: false}
+                ]
+            },
+            {x: 0, y: -100, z: 50, name: 'Barnard\'s Star', lum: 0.005, spec: 'M', faction: 'Neutral Zone', 
+                planets: [
+                    {name: 'Barnard-a', isHabitable: false},
+                    {name: 'Barnard-b', isHabitable: false}
+                ]
+            },
+            {x: 200, y: 0, z: 150, name: 'Rigel', lum: 15000.0, spec: 'O', faction: 'Xeno Dominion', 
+                planets: [
+                    {name: 'Rigel Prime', isHabitable: true, population: 15000000000}
+                ]
+            },
+            {x: -50, y: -50, z: -50, name: 'Epsilon Indi', lum: 0.2, spec: 'K', faction: 'Galactic Federation', 
+                planets: [
+                    {name: 'Epsilon Indi A', isHabitable: true, population: 1234567},
+                    {name: 'Epsilon Indi B', isHabitable: true, population: 99999},
+                    {name: 'Epsilon Indi C', isHabitable: false}
+                ]
+            },
+            {x: 70, y: -30, z: 10, name: 'Procyon', lum: 10.0, spec: 'F', faction: 'Independent Worlds', 
+                planets: [
+                    {name: 'Procyon Alpha', isHabitable: false},
+                    {name: 'Procyon Beta', isHabitable: false},
+                ]
+            },
+            {x: 300, y: 150, z: 200, name: 'Teegarden\'s Star', lum: 0.0001, spec: 'M', faction: 'Neutral Zone', 
+                planets: []
+            },
+            {x: -300, y: -150, z: -200, name: 'Canopus', lum: 100.0, spec: 'B', faction: 'Xeno Dominion', 
+                planets: [
+                    {name: 'Canopus IV', isHabitable: false},
+                    {name: 'Canopus V', isHabitable: true, population: 300000000}
+                ]
+            },
+            {x: 10, y: 10, z: 10, name: 'Tau Ceti', lum: 2.5, spec: 'F', faction: 'Galactic Federation', 
+                planets: [
+                    {name: 'Tau Ceti e', isHabitable: true, population: 1000000000},
+                    {name: 'Tau Ceti f', isHabitable: false},
+                    {name: 'Tau Ceti g', isHabitable: false}
+                ]
+            },
+            {x: -10, y: -10, z: -10, name: 'Alpha Centauri A', lum: 0.5, spec: 'G', faction: 'Independent Worlds', 
+                planets: [
+                    {name: 'Proxima b', isHabitable: false},
+                    {name: 'Proxima c', isHabitable: false},
+                ]
+            }
+        ];
+
+        // ----------------------------------------------------
+        // 2. Three.js 基礎設置與變數
+        // ----------------------------------------------------
+        
+        let scene, camera, renderer, controls, container, starGroup;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        
+        // 恆星數據就是我們用來建立 Mesh 的數據
+        const starObjects = rawStarData;
+
+        // 新增搜尋相關變數
+        let searchInput, searchButton, searchFeedback;
+        const infoPanel = document.getElementById('info-panel'); // 取得資訊面板元素
+
+        function init() {
+            container = document.getElementById('container');
+
+            // 創建場景
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 1, GALAXY_RADIUS * 1.5); // 增加霧氣效果
+
+            // 創建攝影機
+            const aspectRatio = container.clientWidth / container.clientHeight;
+            camera = new THREE.PerspectiveCamera( 75, aspectRatio, 1, 3000 );
+            camera.position.set(200, 200, 500); 
+            
+            // 創建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // ----------------------------------------------------
+            // 3. 創建恆星圓球 (Mesh Spheres) 和政權光暈
+            // ----------------------------------------------------
+            
+            starGroup = new THREE.Group(); // 使用 Group 來管理所有圓球
+
+            starObjects.forEach((star) => {
+                // 1. 恆星大小
+                const size = Math.max(0.5, Math.log10(star.lum * 10) * 1.0); 
+                
+                // 2. 恆星 Mesh
+                const geometry = new THREE.SphereGeometry(size, 16, 16); 
+                const color = SPECTRAL_COLORS[star.spec] || 0xffffff;
+                const material = new THREE.MeshBasicMaterial({ 
+                    color: color,
+                    transparent: true,
+                    opacity: 1,
+                });
+                
+                const starMesh = new THREE.Mesh(geometry, material);
+                starMesh.position.set(star.x, star.y, star.z);
+                
+                // 將原始數據附加到 Mesh 對象的 userData 上
+                starMesh.userData = { starData: star };
+                starGroup.add(starMesh);
+
+                // 3. 政權光暈 (Halo) - 略大的線框球體
+                const factionColor = FACTION_COLORS[star.faction] || 0xAAAAAA;
+                const haloSize = size + 0.3; // 稍微比恆星大一點
+                
+                const haloMaterial = new THREE.MeshBasicMaterial({ 
+                    color: factionColor,
+                    transparent: true,
+                    opacity: 0.7,
+                    wireframe: true, // 使用線框來表示外框
+                });
+                
+                const haloMesh = new THREE.Mesh(new THREE.SphereGeometry(haloSize, 16, 16), haloMaterial);
+                haloMesh.position.set(star.x, star.y, star.z);
+                haloMesh.userData = { isHalo: true }; // 標記為光暈，避免被 Raycaster 誤判
+                starGroup.add(haloMesh);
+            });
+
+            scene.add(starGroup);
+
+            // ----------------------------------------------------
+            // 4. 添加互動控制 (OrbitControls)
+            // ----------------------------------------------------
+            
+            controls = new THREE.OrbitControls( camera, renderer.domElement );
+            controls.enableDamping = true; 
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = true; 
+            controls.minDistance = 10;
+            controls.maxDistance = 1500;
+            
+            // 設置事件監聽器
+            window.addEventListener( 'resize', onWindowResize, false );
+            document.addEventListener('click', onStarClick, false);
+            // 隱藏面板的點擊事件，避免點擊面板時觸發 onStarClick
+            infoPanel.addEventListener('click', (event) => event.stopPropagation());
+
+
+            // ----------------------------------------------------
+            // 5. 搜尋功能綁定
+            // ----------------------------------------------------
+            searchInput = document.getElementById('star-search-input');
+            searchButton = document.getElementById('search-button');
+            searchFeedback = document.getElementById('search-feedback');
+            
+            searchButton.addEventListener('click', searchStar);
+            searchInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    searchStar();
+                }
+            });
+        }
+        
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        /**
+         * 顯示搜尋結果反饋訊息
+         * @param {string} message - 顯示的訊息
+         * @param {boolean} isSuccess - 是否為成功訊息 (綠色)
+         */
+        function showFeedback(message, isSuccess = true) {
+            searchFeedback.textContent = message;
+            searchFeedback.classList.remove('opacity-0', 'bg-red-500', 'bg-green-500');
+            searchFeedback.classList.add('opacity-100', isSuccess ? 'bg-green-600' : 'bg-red-600');
+            
+            // 3秒後自動隱藏
+            setTimeout(() => {
+                searchFeedback.classList.remove('opacity-100');
+                searchFeedback.classList.add('opacity-0');
+            }, 3000);
+        }
+
+        /**
+         * 執行恆星名稱搜尋並移動攝影機目標
+         */
+        function searchStar() {
+            const query = searchInput.value.trim().toLowerCase();
+            if (query === '') {
+                showFeedback('請輸入恆星名稱。', false);
+                return;
+            }
+
+            // 執行不區分大小寫的模糊匹配
+            const foundStar = starObjects.find(star => 
+                star.name.toLowerCase().includes(query)
+            );
+
+            if (foundStar) {
+                // 將 OrbitControls 的目標點 (target) 設定為恆星座標
+                controls.target.set(foundStar.x, foundStar.y, foundStar.z);
+                controls.update(); // 必須更新控制項
+
+                showFeedback(`已找到 "${foundStar.name}"，正在前往。`, true);
+
+                // 顯示資訊面板
+                showStarInfo(foundStar);
+
+            } else {
+                showFeedback(`找不到包含 "${query}" 的恆星。`, false);
+                hideStarInfo();
+            }
+        }
+
+
+        // ----------------------------------------------------
+        // 6. 點擊事件處理
+        // ----------------------------------------------------
+        function onStarClick(event) {
+            // 檢查點擊是否發生在搜尋容器內
+            if (document.getElementById('search-container').contains(event.target) || infoPanel.contains(event.target)) {
+                // 忽略點擊 UI 元素
+                return;
+            }
+
+            // 將滑鼠點擊位置轉換為標準化設備座標 (-1 到 +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+            
+            // 更新 Raycaster
+            raycaster.setFromCamera(mouse, camera);
+            
+            // 進行交集檢測 (對 Group 裡面的所有 Mesh 進行檢測)
+            const intersects = raycaster.intersectObjects(starGroup.children); 
+
+            if (intersects.length > 0) {
+                // 迭代所有交集，直到找到一個非光暈的恆星 Mesh
+                let selectedStar = null;
+                
+                for (let i = 0; i < intersects.length; i++) {
+                    const intersection = intersects[i];
+                    
+                    // 檢查是否為恆星本身 (而不是光暈)
+                    if (!intersection.object.userData.isHalo) {
+                        selectedStar = intersection.object.userData.starData;
+                        // 找到後立即跳出迴圈
+                        break;
+                    }
+                }
+
+                if (selectedStar) {
+                    // 顯示資訊
+                    showStarInfo(selectedStar);
+                } else {
+                    // 點擊到了光暈或背景，隱藏資訊
+                    hideStarInfo();
+                }
+            } else {
+                hideStarInfo();
+            }
+        }
+
+        // 由於改用固定面板，不再需要 x, y 參數
+        function showStarInfo(star) {
+            // 填充數據
+            document.getElementById('popup-title').textContent = star.name; // 將名稱設為標題
+            document.getElementById('popup-name').textContent = star.name;
+            document.getElementById('popup-spec').textContent = star.spec;
+            document.getElementById('popup-lum').textContent = `${star.lum.toFixed(3)} L☉ (太陽光度)`;
+            
+            // 填充政權資訊並設定顏色
+            const factionElement = document.getElementById('popup-faction');
+            factionElement.textContent = star.faction;
+            // 轉換 FACTION_COLORS 的十六進制數字為 CSS 顏色字串
+            const factionCssColor = `#${FACTION_COLORS[star.faction].toString(16).padStart(6, '0')}`;
+            factionElement.style.color = factionCssColor;
+
+            // 動態生成行星列表
+            const planetsListContainer = document.getElementById('popup-planets-list');
+            planetsListContainer.innerHTML = ''; // 清除舊內容
+
+            if (star.planets && star.planets.length > 0) {
+                star.planets.forEach(planet => {
+                    const planetRow = document.createElement('div');
+                    // 移除 max-h-40，讓面板自動滾動
+                    planetRow.className = 'flex justify-between items-center text-xs py-1 px-2 border-b border-gray-800 last:border-b-0';
+                    
+                    let detailsHtml = `
+                        <span class="font-medium ${planet.isHabitable ? 'text-green-300' : 'text-gray-400'}">${planet.name}</span>
+                    `;
+
+                    if (planet.isHabitable) {
+                        const populationString = planet.population ? planet.population.toLocaleString('zh-TW') : '未知';
+                        detailsHtml += `
+                            <span class="text-green-500 font-bold ml-4">
+                                人口: ${populationString}
+                            </span>
+                        `;
+                    } else {
+                        detailsHtml += `<span class="text-gray-500 ml-4">非適居</span>`;
+                    }
+                    
+                    planetRow.innerHTML = detailsHtml;
+                    planetsListContainer.appendChild(planetRow);
+                });
+            } else {
+                 planetsListContainer.innerHTML = `<div class="text-gray-500 text-center py-4">無已知行星</div>`;
+            }
+
+            // 顯示資訊面板 (使用 transform 實現滑動效果)
+            infoPanel.classList.add('visible');
+        }
+
+        function hideStarInfo() {
+            // 隱藏資訊面板 (使用 transform 實現滑動效果)
+            infoPanel.classList.remove('visible');
+            // 清空內容，以便下次打開時內容是乾淨的
+            document.getElementById('popup-title').textContent = '';
+            document.getElementById('popup-name').textContent = '';
+            document.getElementById('popup-faction').textContent = '';
+            document.getElementById('popup-spec').textContent = '';
+            document.getElementById('popup-lum').textContent = '';
+            document.getElementById('popup-planets-list').innerHTML = '';
+        }
+
+        // ----------------------------------------------------
+        // 7. 渲染迴圈
+        // ----------------------------------------------------
+        
+        function animate() {
+            requestAnimationFrame( animate );
+            controls.update(); // 更新控制器
+            renderer.render( scene, camera );
+        }
+        
+        // 頁面載入後啟動應用程式
+        window.onload = function() {
+            try {
+                init();
+                animate();
+            } catch (error) {
+                console.error("初始化 3D 場景時發生錯誤:", error);
+                document.getElementById('info').textContent = '錯誤: 無法初始化 3D 渲染。請檢查瀏覽器支援。';
+            }
+        };
+
+    </script>
+</body>
+</html>
