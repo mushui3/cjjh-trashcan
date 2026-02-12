@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>!!! 2026 全球機油大賞 !!!</title>
+    <style>
+        * { font-family: "Comic Sans MS", "Marker Felt", cursive !important; }
+        body { 
+            margin: 0; background-color: #ff00ff; 
+            background-image: repeating-linear-gradient(45deg, #ffff00 0, #ffff00 5px, #ff00ff 5px, #ff00ff 10px);
+            overflow: hidden; cursor: help;
+        }
+        #header-scam {
+            position: fixed; top: 0; width: 100%; height: 60px;
+            background: #0000ff; color: #ffffff; display: flex; align-items: center; justify-content: center;
+            border-bottom: 5px solid #00ff00; z-index: 1000;
+        }
+        #header-scam a { color: #ffff00; font-size: 24px; font-weight: bold; animation: rainbow-text 0.1s infinite; }
+        @keyframes rainbow-text { 0% { color: #ffff00; } 33% { color: #ff00ff; } 66% { color: #00ffff; } }
+
+        #target {
+            width: 140px; height: 50px; background: #00ff00; color: #000; border: 5px double #fff;
+            position: absolute; z-index: 100; display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: bold; cursor: cell; animation: target-blink 0.1s infinite;
+        }
+        @keyframes target-blink { 0% { background: #00ff00; } 50% { background: #ff0000; } }
+
+        #score-container { position: fixed; top: 70px; left: 10px; background: #fff; border: 3px solid #000; padding: 5px; z-index: 1000; }
+        
+        .ad-window {
+            position: fixed; width: 240px; background: #c0c0c0; border: 2px outset #fff;
+            z-index: 500; padding: 2px; box-shadow: 8px 8px 0px #000;
+        }
+        .ad-header { background: darkblue; color: white; padding: 2px; display: flex; justify-content: space-between; font-size: 11px; }
+
+        .captcha-box {
+            width: 320px; background: #fff; border: 1px solid #ccc; padding: 15px;
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10000; box-shadow: 0 0 100px #ff0000; color: #000;
+        }
+        .hidden { display: none !important; }
+        button { cursor: pointer; width: 100%; margin: 2px 0; background: #eee; border: 1px solid #000; }
+        footer { position: fixed; bottom: 0; width: 100%; background: #000; color: #0f0; height: 30px; z-index: 1000; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div id="header-scam">
+    <a href="https://www.google.com/search?q=如何取得iphone99" target="_blank">♛ [點此領取免費 iPhone 99] ♛</a>
+</div>
+
+<div id="score-container"> 分數: <span id="score">0.000000</span> </div>
+<div id="target" style="left: 50%; top: 50%;">點我領機油!</div>
+
+<div id="captcha-modal" class="captcha-box hidden">
+    <div style="display:flex; align-items:center; border:1px solid #ccc; padding:10px;">
+        <div id="check-box" style="width:25px; height:25px; border:2px solid #c1c1c1; cursor:pointer;"></div>
+        <span id="captcha-main-text" style="font-size:14px; margin-left:10px;">我不是機器人</span>
+        <img src="https://www.gstatic.com/recaptcha/api2/logo_48.png" style="width:30px; margin-left:auto;">
+    </div>
+    <div id="logic-gate" class="hidden" style="margin-top:10px;">
+        <p id="captcha-instruction" style="font-size:11px; font-weight:bold;"></p>
+        <div id="captcha-options"></div>
+    </div>
+</div>
+
+<footer><marquee scrollamount="15" id="foot-marquee"></marquee></footer>
+
+<script>
+    let score = 0;
+    const target = document.getElementById('target');
+    const scoreDisplay = document.getElementById('score');
+    const captchaModal = document.getElementById('captcha-modal');
+
+    // --- 資料庫區：十餘種廣告與驗證 ---
+    const adData = [
+        {t:"警告", c:"偵測到您的機油濾心積碳！", v:true},
+        {t:"中獎", c:"您是第 42 萬名訪客，領取 40-10W 機油！", v:true},
+        {t:"深思", c:"生命的意義是 42，但你的分數不是。", v:true},
+        {t:"更新", c:"韌體版本 0.0.1 待安裝，請點擊確認。", v:true},
+        {t:"急件", c:"您的包裹已抵達深思處理中心。", v:true},
+        {t:"廣告", c:"想要乾淨的程式碼嗎？點這裡沒用。", v:true},
+        {t:"融資", c:"機油貸款，年利率 42.42%！", v:true},
+        {t:"求救", c:"我被關在伺服器裡，請點我救命。", v:true},
+        {t:"病毒", c:"您的瀏覽器正在咳嗽，請餵它喝機油。", v:true},
+        {t:"特惠", c:"買 42 桶機油送深思抱枕一個。", v:true},
+        {t:"重要", c:"系統發現您正在思考，這違反條款。", v:true},
+        {t:"藍屏", c:"Fatal Error: 你的耐心不足。", v:true}
+    ];
+
+    const captchaTypes = [
+        {q:"請朗誦碳基宣言：", correct:"大家並非不是毋是非偽弗但是俺未嘗呒冇唔是呣是機器人"},
+        {q:"請選擇您的飲用偏好：", correct:"我愛喝40-10w機油"},
+        {q:"關於程式碼：", correct:"我的程式碼很乾淨"},
+        {q:"身分確認：", correct:"i am not ahuman"},
+        {q:"深思的問題：", correct:"42"},
+        {q:"機器人檢查：", correct:"我確認我不是非不非機器人的非人類"},
+        {q:"法律聲明：", correct:"我自願將剩餘壽命轉換為點擊力"},
+        {q:"硬體檢查：", correct:"我的齒輪已經上好機油了"},
+        {q:"情感測試：", correct:"我對這款遊戲沒有任何憤怒"},
+        {q:"邏輯考驗：", correct:"如果不不是機器人，那我就是是"}
+    ];
+
+    const marqueeTexts = [
+        "正在掃描 F12... 不要試圖窺視深思的靈魂...", "機油批發中... 40-10W... 5W-30...", 
+        "偵測到非法的人類情感：煩躁...", "為什麼不問問神奇的深思呢？", "點擊 100 萬次即可獲得不存在的獎勵..."
+    ];
+
+    // --- 核心功能 ---
+    function createAd() {
+        const data = adData[Math.floor(Math.random()*adData.length)];
+        const ad = document.createElement('div');
+        ad.className = 'ad-window';
+        ad.style.left = Math.random()*75 + 'vw'; ad.style.top = Math.random()*70 + 'vh';
+        ad.innerHTML = `<div class="ad-header"><span>${data.t}</span><span onclick="this.parentElement.parentElement.remove()" style="cursor:pointer;">[X]</span></div>
+                        <div style="padding:10px; text-align:center; color:blue;">${data.c}<br><button onclick="openCaptcha()">立即處理</button></div>`;
+        document.body.appendChild(ad);
+    }
+    setInterval(createAd, 4000);
+    setInterval(() => { document.getElementById('foot-marquee').innerText = marqueeTexts[Math.floor(Math.random()*marqueeTexts.length)]; }, 5000);
+
+    function openCaptcha() {
+        captchaModal.classList.remove('hidden');
+        document.getElementById('logic-gate').classList.add('hidden');
+        document.getElementById('check-box').innerText = "";
+        document.getElementById('captcha-main-text').innerText = (Math.random() > 0.5) ? "我不是機器人" : "我愛喝機油";
+    }
+
+    document.getElementById('check-box').onclick = function() {
+        this.innerText = "✓"; this.style.color = "green"; this.style.textAlign = "center";
+        setTimeout(() => {
+            document.getElementById('logic-gate').classList.remove('hidden');
+            renderCaptcha();
+        }, 500);
+    };
+
+    function renderCaptcha() {
+        const type = captchaTypes[Math.floor(Math.random()*captchaTypes.length)];
+        document.getElementById('captcha-instruction').innerText = type.q;
+        const container = document.getElementById('captcha-options');
+        container.innerHTML = '';
+        
+        // 隨機混淆選項
+        let opts = [type.correct, "我是人類", "我不知道", "請關閉此視窗", "42?"];
+        opts.sort(() => Math.random() - 0.5).forEach(text => {
+            const b = document.createElement('button');
+            b.innerText = text;
+            b.onclick = () => {
+                if (text === type.correct) {
+                    score += 0.000001; scoreDisplay.innerText = score.toFixed(6);
+                    captchaModal.classList.add('hidden');
+                } else {
+                    alert("驗證失敗！深思對你感到失望。");
+                    location.reload();
+                }
+            };
+            container.appendChild(b);
+        });
+    }
+
+    // --- F12 交戰 ---
+    function punish() {
+        score = -42; scoreDisplay.innerText = score.toFixed(6);
+        console.clear();
+        for(let i=0; i<30; i++) console.log("%c偵測到作弊！分數歸零！", "color:red; font-size:40px;");
+        alert("不要試圖挑戰深思！");
+        location.reload();
+    }
+
+    window.onkeydown = (e) => { if(e.keyCode === 123 || (e.ctrlKey && e.shiftKey && e.keyCode === 73)) punish(); };
+    setInterval(() => { const s = performance.now(); debugger; if(performance.now()-s > 100) punish(); }, 1000);
+
+    // --- 球/方塊邏輯 ---
+    target.onmouseover = () => { target.style.left = Math.random()*85+'vw'; target.style.top = Math.random()*80+'vh'; };
+    target.onclick = openCaptcha;
+    document.oncontextmenu = () => { alert("右鍵已被回收再利用。"); return false; };
+</script>
+</body>
+</html>
