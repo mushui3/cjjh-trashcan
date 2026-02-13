@@ -2,36 +2,28 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>瀾滄巨陣：古代陣法對決系統</title>
+    <title>瀾滄巨陣：150棋鏡像對稱版</title>
     <style>
-        :root { --bg: #1e1e1e; --side: #252526; --btn: #3e3e42; --accent: #007acc; }
-        body { background: var(--bg); color: #ccc; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; display: flex; margin: 0; height: 100vh; overflow: hidden; }
+        :root { --bg: #121212; --side: #1e1e1e; --accent: #c0392b; }
+        body { background: var(--bg); color: #ccc; font-family: sans-serif; display: flex; margin: 0; height: 100vh; overflow: hidden; }
         
-        /* 側邊欄佈局 */
-        #sidebar { width: 350px; background: var(--side); display: flex; flex-direction: column; border-left: 1px solid #333; padding: 15px; box-sizing: border-box; }
-        #board-area { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #111; position: relative; }
+        /* 修正視角：允許滾動查看完整棋盤 */
+        #board-area { flex: 1; overflow: auto; background: #000; display: block; padding: 40px; }
+        canvas { background: #d2b48c; border: 10px solid #3e2723; display: block; margin: 0 auto; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
 
-        canvas { background: #d2b48c; box-shadow: 0 0 50px rgba(0,0,0,0.5); border: 2px solid #555; }
-
-        .panel-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #fff; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        #sidebar { width: 360px; background: var(--side); display: flex; flex-direction: column; padding: 20px; border-left: 1px solid #333; box-shadow: -5px 0 15px rgba(0,0,0,0.5); }
+        #status { font-size: 24px; color: #f1c40f; text-align: center; margin-bottom: 15px; font-weight: bold; border-bottom: 2px solid #444; padding-bottom: 10px; }
         
-        /* 戰報滾動區 */
-        #log-container { flex: 1; background: #000; border-radius: 4px; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; margin-bottom: 15px; display: flex; flex-direction: column-reverse; }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 2px; }
-        .log-red { color: #ff6b6b; }
-        .log-black { color: #4dabf7; }
-        .log-time { color: #666; font-size: 10px; }
-
-        /* 按鈕組 */
-        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
-        button { background: var(--btn); color: white; border: 1px solid #555; padding: 8px; cursor: pointer; border-radius: 3px; font-size: 12px; }
-        button:hover { background: var(--accent); }
-        button.primary { background: #c0392b; border: none; }
+        #log-container { flex: 1; background: #080808; overflow-y: auto; padding: 12px; font-family: 'Consolas', monospace; font-size: 13px; margin: 10px 0; border: 1px solid #333; display: flex; flex-direction: column-reverse; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #222; padding-bottom: 2px; }
+        .log-red { color: #ff7675; } .log-black { color: #74b9ff; }
         
-        /* 隱藏的文件輸入 */
-        #fileInput { display: none; }
-
-        #legend { font-size: 11px; max-height: 150px; overflow-y: auto; color: #aaa; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { background: #333; color: white; border: 1px solid #555; padding: 10px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #444; border-color: var(--accent); }
+        button.primary { background: var(--accent); border: none; }
+        
+        .legend-box { font-size: 11px; max-height: 180px; overflow-y: auto; color: #888; margin-top: 10px; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -41,60 +33,50 @@
 </div>
 
 <div id="sidebar">
-    <div id="status" style="font-size: 20px; text-align: center; margin-bottom: 15px; color: #f1c40f;">紅方回合</div>
-    
-    <div class="panel-title">戰略控制</div>
+    <div id="status">紅方回合</div>
     <div class="btn-group">
-        <button onclick="initNewGame('HH')">雙人對陣</button>
-        <button onclick="initNewGame('HA')">人機對陣</button>
+        <button onclick="newGame('HH')">雙人對陣</button>
+        <button onclick="newGame('HA')">人機對陣</button>
         <button onclick="exportGame()">匯出戰局</button>
-        <button onclick="document.getElementById('fileInput').click()">匯入戰局</button>
-        <button class="primary" style="grid-column: span 2;" onclick="resetCurrent()">重新開始</button>
+        <button onclick="document.getElementById('fileIn').click()">匯入戰局</button>
+        <button class="primary" style="grid-column: span 2" onclick="resetCurrent()">重新開始</button>
     </div>
-    <input type="file" id="fileInput" accept=".json" onchange="importGame(event)">
+    <input type="file" id="fileIn" style="display:none" onchange="importGame(event)">
 
-    <div class="panel-title">戰報 (最新置頂)</div>
     <div id="log-container"></div>
-
-    <div class="panel-title">兵種簡介</div>
-    <div id="legend"></div>
+    <div class="legend-box" id="legend"></div>
 </div>
 
 <script>
-const COLS = 32, ROWS = 33, CELL = 25;
+const COLS = 32, ROWS = 33, CELL = 28;
 const RED = 'RED', BLACK = 'BLACK';
 const canvas = document.getElementById('gameBoard');
 const ctx = canvas.getContext('2d');
-canvas.width = COLS * CELL;
-canvas.height = ROWS * CELL;
+canvas.width = COLS * CELL; canvas.height = ROWS * CELL;
 
 let board = [];
 let turn = RED;
 let selected = null;
-let gameMode = 'HH';
+let mode = 'HH';
 let gameOver = false;
 let tips = [];
 
-const PIECE_TYPES = {
-    '帥': { val: 1000, color: RED }, '將': { val: 1000, color: BLACK },
-    '仕': { val: 30, color: RED }, '士': { val: 30, color: BLACK },
-    '相': { val: 30, color: RED }, '象': { val: 30, color: BLACK },
-    '車': { val: 100 }, '俥': { val: 100 },
-    '馬': { val: 50 }, '傌': { val: 50 },
-    '炮': { val: 60 }, '砲': { val: 60 },
-    '兵': { val: 15 }, '卒': { val: 15 },
-    '蛟': { val: 80, desc: '水域限定，直線無限' },
+// 棋子設定
+const PIECE_DEFS = {
+    '帥': { val: 1000, desc: '主帥，被吃則輸' }, '將': { val: 1000 },
+    '車': { val: 100, desc: '直線無限' }, '俥': { val: 100 },
+    '馬': { val: 50, desc: '日字，有蹩腿' }, '傌': { val: 50 },
+    '炮': { val: 60, desc: '隔一子吃子' }, '砲': { val: 60 },
+    '兵': { val: 20, desc: '過河後可橫行' }, '卒': { val: 20 },
+    '蛟': { val: 80, desc: '水域車，直線無限' },
     '樓': { val: 70, desc: '兩棲，水中如車' },
     '鬼': { val: 40, desc: '水中刺客，八方一步' },
-    '驍': { val: 65, desc: '走目字，衝鋒' },
-    '弩': { val: 60, desc: '直走，吃三格處' },
-    '投': { val: 75, desc: '跳二吃一' },
-    '甲': { val: 55, desc: '重裝，擋炮跳' },
-    '刺': { val: 60, desc: '斜行無限' },
-    '工': { val: 35, desc: '工兵輔助' },
-    '醫': { val: 45, desc: '醫療單位' },
-    '謀': { val: 95, desc: '換位奇門' },
-    '戰': { val: 70, desc: '重裝戰象' }
+    '驍': { val: 65, desc: '目字(1x3)跨越' },
+    '弩': { val: 60, desc: '直線吃三格處' },
+    '投': { val: 75, desc: '隔二子吃子' },
+    '甲': { val: 55, desc: '重裝，防禦炮火' },
+    '刺': { val: 65, desc: '斜行無限' },
+    '戰': { val: 75, desc: '戰象，田字跨河' }
 };
 
 function isWater(r, c) {
@@ -103,193 +85,212 @@ function isWater(r, c) {
            (r >= 17 && r <= 24 && (c >= 4 && c <= 11 || c >= 20 && c <= 27));
 }
 
-// 陣法佈置系統
-function setupFormations() {
+// 絕對鏡像佈陣邏輯
+function setupMirrorBoard() {
     board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    const sidePieces = getSideList();
     
-    // 黑方：魚鱗陣 (密集三角)
-    const blackPieces = getPieceList(BLACK);
-    const blackWater = blackPieces.filter(p => "蛟樓鬼".includes(p));
-    const blackLand = blackPieces.filter(p => !"蛟樓鬼".includes(p));
-    
-    let li = 0, wi = 0;
-    // 布置水軍於黑方水域
-    for(let r=8; r<16; r++) for(let c=0; c<COLS; c++) if(isWater(r,c) && wi<blackWater.length) board[r][c]={type:blackWater[wi++], color:BLACK};
-    
-    // 魚鱗佈局 (三角形)
-    for(let dr=0; dr<12; dr++) {
-        let r = dr;
-        let width = dr; // 寬度隨行數增加
-        for(let offset = -width; offset <= width; offset++) {
-            let c = 15 + offset;
-            if(c>=0 && c<COLS && !board[r][c] && !isWater(r,c) && li<blackLand.length) {
-                board[r][c] = {type: blackLand[li++], color:BLACK};
+    // 預計算紅方佈置座標
+    const redPositions = [];
+    const navyList = sidePieces.filter(p => "蛟鬼樓".includes(p));
+    const landList = sidePieces.filter(p => !"蛟鬼樓".includes(p));
+
+    // 1. 紅方水軍 (Row 17-24)
+    let ni = 0;
+    for (let r = 17; r <= 24; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (isWater(r, c) && r !== 16 && ni < navyList.length) {
+                redPositions.push({ r, c, type: navyList[ni++] });
             }
         }
     }
 
-    // 紅方：鶴翼陣 (兩翼展開)
-    const redPieces = getPieceList(RED);
-    const redWater = redPieces.filter(p => "蛟樓鬼".includes(p));
-    const redLand = redPieces.filter(p => !"蛟樓鬼".includes(p));
-
-    li = 0, wi = 0;
-    // 布置水軍於紅方水域
-    for(let r=17; r<25; r++) for(let c=0; c<COLS; c++) if(isWater(r,c) && wi<redWater.length) board[r][c]={type:redWater[wi++], color:RED};
-
-    // 鶴翼佈局 (帥在後，兵在前，兩翼向前突)
-    for(let dr=0; dr<15; dr++) {
-        let r = 32 - dr;
-        let gap = Math.max(0, 10 - dr); // 中間留白隨前進縮小
-        for(let offset = gap; offset < gap + 10; offset++) {
-            let cols = [15-offset, 15+offset];
-            for(let c of cols) {
-                if(c>=0 && c<COLS && !board[r][c] && !isWater(r,c) && li<redLand.length) {
-                    board[r][c] = {type: redLand[li++], color:RED};
+    // 2. 紅方陸軍 (Row 32 往上，止於 Row 19，預留 Row 18,17 為緩衝)
+    let li = 0;
+    for (let r = 32; r >= 19; r--) {
+        // 契形佈置：每行從中央向兩邊擴散
+        let span = 32 - r + 5;
+        for (let offset = 0; offset <= span; offset++) {
+            let targets = offset === 0 ? [15] : [15 - offset, 16 + offset];
+            for (let c of targets) {
+                if (c >= 0 && c < COLS && !isWater(r, c) && li < landList.length) {
+                    redPositions.push({ r, c, type: landList[li++] });
                 }
             }
         }
     }
+
+    // 應用到紅方並鏡像到黑方
+    redPositions.forEach(p => {
+        // 紅方
+        board[p.r][p.c] = { type: p.type, color: RED };
+        // 黑方鏡像 (Row 0 = 32-32, Row 1 = 32-31...)
+        let bType = p.type;
+        if(bType==='帥') bType='將'; if(bType==='車') bType='俥';
+        if(bType==='馬') bType='傌'; if(bType==='炮') bType='砲'; if(bType==='兵') bType='卒';
+        board[32 - p.r][p.c] = { type: bType, color: BLACK };
+    });
 }
 
-function getPieceList(color) {
+function getSideList() {
+    const counts = { '帥':1,'仕':8,'相':10,'車':12,'馬':15,'炮':16,'兵':30,'蛟':4,'樓':6,'鬼':6,'驍':6,'弩':6,'投':4,'甲':6,'刺':4,'工':4,'醫':2,'謀':2,'戰':8 };
     const list = [];
-    const counts = { '帥':1, '仕':8, '相':10, '車':12, '馬':15, '炮':16, '兵':30, '蛟':4, '樓':6, '鬼':6, '驍':6, '弩':6, '投':4, '甲':6, '刺':4, '工':4, '醫':2, '謀':2, '戰':8 };
-    const maps = color === RED ? {} : {'帥':'將','仕':'士','相':'象','車':'俥','馬':'傌','炮':'砲','兵':'卒'};
-    Object.keys(counts).forEach(k => {
-        let type = maps[k] || k;
-        for(let i=0; i<counts[k]; i++) list.push(type);
-    });
+    Object.keys(counts).forEach(k => { for(let i=0; i<counts[k]; i++) list.push(k); });
     return list;
 }
 
-// 基礎功能
-function draw() {
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    for(let r=0; r<ROWS; r++) {
-        for(let c=0; c<COLS; c++) {
-            let x=c*CELL, y=r*CELL;
-            if(r===16) ctx.fillStyle='#2980b9';
-            else if(isWater(r,c)) ctx.fillStyle='#3498db';
-            else ctx.fillStyle=(r+c)%2===0 ? '#d2b48c' : '#c4a47c';
-            ctx.fillRect(x,y,CELL,CELL);
-            ctx.strokeStyle='rgba(0,0,0,0.05)';
-            ctx.strokeRect(x,y,CELL,CELL);
-        }
+// 走法邏輯 (車衝馬斜炮飛)
+function isValid(fr, fc, tr, tc) {
+    const p = board[fr][fc];
+    const target = board[tr][tc];
+    if (target && target.color === p.color) return false;
+    const dr = Math.abs(tr - fr), dc = Math.abs(tc - fc);
+    const sR = Math.sign(tr - fr), sC = Math.sign(tc - fc);
+
+    if ("車俥蛟".includes(p.type)) {
+        if (fr !== tr && fc !== tc) return false;
+        if (p.type === '蛟' && !isWater(tr, tc)) return false;
+        return isPathClear(fr, fc, tr, tc);
     }
-    // 繪製棋子
-    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='bold 14px sans-serif';
-    for(let r=0; r<ROWS; r++) {
-        for(let c=0; c<COLS; c++) {
-            const p = board[r][c];
-            if(!p) continue;
-            let x=c*CELL+CELL/2, y=r*CELL+CELL/2;
-            ctx.beginPath(); ctx.arc(x,y,10,0,7);
-            ctx.fillStyle=p.color===RED?'#c0392b':'#fff';
-            ctx.fill();
-            ctx.strokeStyle=p.color===RED?'#fff':'#333';
-            ctx.stroke();
-            ctx.fillStyle=p.color===RED?'#fff':'#000';
-            ctx.fillText(p.type[0],x,y);
-            if(selected && selected.r===r && selected.c===c) { ctx.strokeStyle='#f1c40f'; ctx.lineWidth=3; ctx.strokeRect(x-12,y-12,24,24); }
-        }
+    if ("馬傌".includes(p.type)) {
+        if (dr === 2 && dc === 1) return !board[fr + sR][fc];
+        if (dr === 1 && dc === 2) return !board[fr][fc + sC];
+        return false;
     }
-    tips.forEach(t=>{ ctx.fillStyle='rgba(46,204,113,0.5)'; ctx.beginPath(); ctx.arc(t.c*CELL+CELL/2,t.r*CELL+CELL/2,4,0,7); ctx.fill(); });
+    if ("炮砲".includes(p.type)) {
+        if (fr !== tr && fc !== tc) return false;
+        let mid = countBetween(fr, fc, tr, tc);
+        if (!target) return mid === 0;
+        return mid === 1 && target.type !== '甲';
+    }
+    if ("兵卒".includes(p.type)) {
+        const fwd = p.color === RED ? -1 : 1;
+        if (tr - fr === fwd && dc === 0) return true;
+        const crossed = p.color === RED ? fr < 16 : fr > 16;
+        return crossed && tr === fr && dc === 1;
+    }
+    if (p.type === '刺') return dr === dc && isPathClear(fr, fc, tr, tc);
+    if (p.type === '戰') return dr === 2 && dc === 2 && !board[fr + sR][fc + sC];
+    if (p.type === '驍') return (dr === 3 && dc === 1) || (dr === 1 && dc === 3);
+
+    return dr <= 1 && dc <= 1;
 }
 
-function addLog(msg, color) {
-    const container = document.getElementById('log-container');
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${color===RED?'log-red':'log-black'}`;
-    const time = new Date().toLocaleTimeString('zh-TW', {hour12:false});
-    entry.innerHTML = `<span class="log-time">[${time}]</span> ${msg}`;
-    container.appendChild(entry);
-    container.scrollTop = container.scrollHeight;
-}
-
-// 存檔與讀檔
-function exportGame() {
-    const data = JSON.stringify({ board, turn, gameMode, log: document.getElementById('log-container').innerHTML });
-    const blob = new Blob([data], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `chess_save_${Date.now()}.json`;
-    a.click();
-}
-
-function importGame(event) {
-    const file = event.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const data = JSON.parse(e.target.result);
-        board = data.board; turn = data.turn; gameMode = data.gameMode;
-        document.getElementById('log-container').innerHTML = data.log;
-        draw();
-    };
-    reader.readAsText(file);
-}
-
-// 遊戲邏輯與交互
-canvas.addEventListener('mousedown', e => {
-    if(gameOver || (gameMode==='HA' && turn===BLACK)) return;
-    const rect = canvas.getBoundingClientRect();
-    const c = Math.floor((e.clientX - rect.left)/CELL), r = Math.floor((e.clientY - rect.top)/CELL);
-    if(selected) {
-        if(isValidMove(selected.r, selected.c, r, c)) { executeMove(selected.r, selected.c, r, c); }
-        else { selected = board[r][c] && board[r][c].color===turn ? {r,c} : null; updateTips(); }
-    } else if(board[r][c] && board[r][c].color===turn) { selected = {r,c}; updateTips(); }
-    draw();
-});
-
-function isValidMove(fr,fc,tr,tc) {
-    const p = board[fr][fc]; const target = board[tr][tc];
-    if(target && target.color===p.color) return false;
-    const dr = Math.abs(tr-fr), dc = Math.abs(tc-fc);
-    // 基礎邏輯(簡化)
-    if("車俥".includes(p.type)) return (fr===tr || fc===tc) && isPathClear(fr,fc,tr,tc);
-    if("兵卒".includes(p.type)) return dr+dc===1;
-    return dr<=1 && dc<=1;
-}
-
-function isPathClear(fr,fc,tr,tc) {
-    let rStep=Math.sign(tr-fr), cStep=Math.sign(tc-fc);
-    let currR=fr+rStep, currC=fc+cStep;
-    while(currR!==tr || currC!==tc) { if(board[currR][currC]) return false; currR+=rStep; currC+=cStep; }
+function isPathClear(fr, fc, tr, tc) {
+    let r = fr + Math.sign(tr-fr), c = fc + Math.sign(tc-fc);
+    while (r !== tr || c !== tc) {
+        if (board[r][c]) return false;
+        if (fr === tr) c += Math.sign(tc-fc); else if (fc === tc) r += Math.sign(tr-fr);
+        else { r += Math.sign(tr-fr); c += Math.sign(tc-fc); }
+    }
     return true;
 }
 
-function executeMove(fr,fc,tr,tc) {
-    const p = board[fr][fc];
-    addLog(`${p.color==='RED'?'紅':'黑'}${p.type}:(${fc},${fr})→(${tc},${tr})`, p.color);
-    if(board[tr][tc] && "帥將".includes(board[tr][tc].type)) { alert(p.color+" 勝利！"); gameOver=true; }
-    board[tr][tc]=p; board[fr][fc]=null; selected=null; tips=[];
-    turn = turn===RED?BLACK:RED;
-    document.getElementById('status').innerText = turn===RED?'紅方回合':'黑方回合';
-    if(!gameOver && gameMode==='HA' && turn===BLACK) setTimeout(aiMove, 500);
+function countBetween(fr, fc, tr, tc) {
+    let cnt = 0, r = fr + Math.sign(tr-fr), c = fc + Math.sign(tc-fc);
+    while (r !== tr || c !== tc) {
+        if (board[r][c]) cnt++;
+        if (fr === tr) c += Math.sign(tc-fc); else r += Math.sign(tr-fr);
+    }
+    return cnt;
+}
+
+// 渲染與操作
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            let x = c * CELL, y = r * CELL;
+            if (r === 16) ctx.fillStyle = '#2980b9';
+            else if (isWater(r, c)) ctx.fillStyle = '#3498db';
+            else ctx.fillStyle = (r + c) % 2 === 0 ? '#d2b48c' : '#c4a47c';
+            ctx.fillRect(x, y, CELL, CELL);
+            ctx.strokeStyle = 'rgba(0,0,0,0.05)'; ctx.strokeRect(x, y, CELL, CELL);
+        }
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 14px Arial';
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const p = board[r][c]; if (!p) continue;
+            let x = c * CELL + CELL / 2, y = r * CELL + CELL / 2;
+            ctx.beginPath(); ctx.arc(x, y, 11, 0, 7);
+            ctx.fillStyle = p.color === RED ? '#c0392b' : '#ecf0f1'; ctx.fill();
+            ctx.strokeStyle = p.color === RED ? '#fff' : '#2c3e50'; ctx.stroke();
+            ctx.fillStyle = p.color === RED ? '#fff' : '#000'; ctx.fillText(p.type[0], x, y);
+            if (selected && selected.r === r && selected.c === c) {
+                ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 3; ctx.strokeRect(x - 13, y - 13, 26, 26);
+            }
+        }
+    }
+    tips.forEach(t => {
+        ctx.fillStyle = 'rgba(46, 204, 113, 0.6)';
+        ctx.beginPath(); ctx.arc(t.c * CELL + CELL / 2, t.r * CELL + CELL / 2, 5, 0, 7); ctx.fill();
+    });
+}
+
+canvas.addEventListener('mousedown', e => {
+    if (gameOver || (mode === 'HA' && turn === BLACK)) return;
+    const rect = canvas.getBoundingClientRect();
+    const c = Math.floor((e.clientX - rect.left) / CELL), r = Math.floor((e.clientY - rect.top) / CELL);
+    if (selected) {
+        if (isValid(selected.r, selected.c, r, c)) {
+            const p = board[selected.r][selected.c];
+            const time = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            document.getElementById('log-container').innerHTML += `<div class="log-entry ${p.color === RED ? 'log-red' : 'log-black'}">[${time}] ${p.color === RED ? '紅' : '黑'}${p.type}:(${selected.c},${selected.r})→(${c},${r})</div>`;
+            if (board[r][c] && "帥將".includes(board[r][c].type)) { alert(p.color + " 勝利！"); gameOver = true; }
+            board[r][c] = p; board[selected.r][selected.c] = null;
+            selected = null; tips = []; turn = turn === RED ? BLACK : RED;
+            document.getElementById('status').innerText = turn === RED ? '紅方回合' : '黑方回合';
+            if (!gameOver && mode === 'HA') setTimeout(aiMove, 600);
+        } else { selected = board[r][c] && board[r][c].color === turn ? { r, c } : null; updateTips(); }
+    } else if (board[r][c] && board[r][c].color === turn) { selected = { r, c }; updateTips(); }
     draw();
+});
+
+function updateTips() {
+    tips = []; if (!selected) return;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isValid(selected.r, selected.c, r, c)) tips.push({ r, c });
 }
 
 function aiMove() {
     let moves = [];
-    for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
-        if(board[r][c] && board[r][c].color===BLACK) {
-            for(let tr=r-2; tr<=r+2; tr++) for(let tc=c-2; tc<=c+2; tc++) {
-                if(tr>=0 && tr<ROWS && tc>=0 && tc<COLS && isValidMove(r,c,tr,tc)) moves.push({fr:r,fc:c,tr,tc,score: board[tr][tc]?10:0});
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+        if (board[r][c] && board[r][c].color === BLACK) {
+            for (let tr = Math.max(0,r-4); tr <= Math.min(ROWS-1,r+4); tr++) {
+                for (let tc = Math.max(0,c-4); tc <= Math.min(COLS-1,c+4); tc++) {
+                    if (isValid(r, c, tr, tc)) moves.push({ fr: r, fc: c, tr, tc, s: board[tr][tc] ? 10 : 0 });
+                }
             }
         }
     }
-    if(moves.length>0) { let m=moves.sort((a,b)=>b.score-a.score)[0]; executeMove(m.fr,m.fc,m.tr,m.tc); }
+    if (moves.length > 0) {
+        let m = moves.sort((a, b) => b.s - a.s)[0];
+        const p = board[m.fr][m.fc];
+        board[m.tr][m.tc] = p; board[m.fr][m.fc] = null; turn = RED;
+        document.getElementById('status').innerText = '紅方回合'; draw();
+    }
 }
 
-function updateTips() { tips=[]; if(!selected) return; for(let r=selected.r-5;r<=selected.r+5;r++) for(let c=selected.c-5;c<=selected.c+5;c++) if(r>=0&&r<ROWS&&c>=0&&c<COLS&&isValidMove(selected.r,selected.c,r,c)) tips.push({r,c}); }
+function exportGame() {
+    const data = JSON.stringify({ board, turn, mode, log: document.getElementById('log-container').innerHTML });
+    const a = document.createElement('a'); a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(data); a.download = 'save.json'; a.click();
+}
 
-function initNewGame(m) { gameMode=m; resetCurrent(); }
-function resetCurrent() { gameOver=false; turn=RED; selected=null; tips=[]; document.getElementById('log-container').innerHTML=''; setupFormations(); draw(); }
+function importGame(e) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        const d = JSON.parse(ev.target.result);
+        board = d.board; turn = d.turn; mode = d.mode; document.getElementById('log-container').innerHTML = d.log; draw();
+    };
+    reader.readAsText(e.target.files[0]);
+}
 
-// 說明
+function newGame(m) { mode = m; resetCurrent(); }
+function resetCurrent() { gameOver = false; turn = RED; selected = null; tips = []; document.getElementById('log-container').innerHTML = ''; setupMirrorBoard(); draw(); }
+
+// 初始化說明
 const leg = document.getElementById('legend');
-Object.keys(PIECE_TYPES).forEach(k => { if(PIECE_TYPES[k].desc) leg.innerHTML += `<div><b>${k}</b>: ${PIECE_TYPES[k].desc}</div>`; });
+Object.keys(PIECE_DEFS).forEach(k => { if (PIECE_DEFS[k].desc) leg.innerHTML += `<div><b>${k}</b>: ${PIECE_DEFS[k].desc}</div>`; });
 
 resetCurrent();
 </script>
