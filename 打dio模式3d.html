@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D P2P 多人競技場 - 模型優化版</title>
+    <title>3D P2P 多人競技場 - 正式修復版</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
         #ui { position: absolute; top: 20px; left: 20px; color: white; z-index: 100; pointer-events: none; }
@@ -42,7 +42,7 @@
 
     <div id="ui">
         <div class="hud-info">血量: <span id="health-display">100</span> / 100</div>
-        <div class="hud-info">當前武器: <span id="weapon-name" style="color:#3498db">---</span></div>
+        <div class="hud-info">武器: <span id="weapon-name" style="color:#3498db">---</span></div>
         <div class="hud-info">彈藥: <span id="ammo-display">---</span></div>
         <div id="status-msg" style="color: #2ecc71;"></div>
     </div>
@@ -56,7 +56,7 @@
 
     <div id="menu">
         <h2>戰場設定</h2>
-        <div id="status">正在載入 PeerJS...</div>
+        <div id="status">正在初始化網路...</div>
         <div id="peer-id-display">ID: ---</div>
         
         <div class="weapon-config">
@@ -133,18 +133,14 @@
 
         function createCharacter(color) {
             const group = new THREE.Group();
-            
-            // 軀幹
             const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.3), new THREE.MeshStandardMaterial({ color }));
             body.position.y = 1.2;
             group.add(body);
 
-            // 頭
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshStandardMaterial({ color: 0xffdbac }));
             head.position.y = 1.8;
             group.add(head);
 
-            // 四肢 (為了方便動畫，分別建立組)
             const limbs = {};
             const limbGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
             const limbMat = new THREE.MeshStandardMaterial({ color });
@@ -172,23 +168,24 @@
         function createWeaponModel(type, key) {
             const group = new THREE.Group();
             if (type === 'gun') {
-                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-                const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), new THREE.MeshStandardMaterial({ color: 0x333333 }));
                 barrel.position.z = -0.3;
                 group.add(body, barrel);
             } else {
                 const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.05), new THREE.MeshStandardMaterial({ color: 0x4b2d1f }));
                 group.add(handle);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x888888 });
                 if (key === 'axe') {
-                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.05), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.05), mat);
                     blade.position.y = 0.2;
                     group.add(blade);
                 } else if (key === 'dagger') {
-                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), mat);
                     blade.position.y = 0.3;
                     group.add(blade);
                 } else if (key === 'sword') {
-                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.8, 0.02), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.8, 0.02), mat);
                     blade.position.y = 0.5;
                     group.add(blade);
                 }
@@ -214,7 +211,6 @@
             scene.add(floor);
             scene.add(new THREE.GridHelper(200, 50, 0x3498db, 0x111111));
 
-            // 地圖元素
             for(let i=0; i<15; i++) {
                 const h = Math.random()*5+2;
                 const b = new THREE.Mesh(new THREE.BoxGeometry(4, h, 4), new THREE.MeshStandardMaterial({ color: 0x1a252f }));
@@ -222,28 +218,22 @@
                 scene.add(b);
             }
 
-            // 自己
             player = new THREE.Group();
             player.position.set(0, 0, 15);
             scene.add(player);
             player.add(camera);
             camera.position.set(0, 1.8, 0);
 
-            // 手部武器容器 (第一人稱看不到自己身體，但能看到武器)
             const weaponHand = new THREE.Group();
             weaponHand.position.set(0.4, 1.4, -0.5);
             camera.add(weaponHand);
             player.userData.weaponHand = weaponHand;
 
-            // 遠端玩家
             remotePlayer = createCharacter(0xe74c3c);
             remotePlayer.position.y = -50;
             scene.add(remotePlayer);
 
-            // 醫療包
             spawnMedkits();
-
-            // 事件與聯網
             initControls();
             initNetwork();
             animate();
@@ -287,7 +277,11 @@
 
         function initControls() {
             window.addEventListener('resize', onResize);
-            document.addEventListener('keydown', (e) => { if(!isGameOver) keys[e.key.toLowerCase()] = true; });
+            document.addEventListener('keydown', (e) => { 
+                if(!isGameOver) keys[e.key.toLowerCase()] = true; 
+                if(e.key === '1') switchSlot(1);
+                if(e.key === '2') switchSlot(2);
+            });
             document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
             renderer.domElement.addEventListener('click', () => { if(!isGameOver && isConnected) renderer.domElement.requestPointerLock(); });
             document.addEventListener('mousemove', onMouseMove);
@@ -317,8 +311,7 @@
                     }
                 } else spawnBullet(pos, dir, true, gun.type === 'explosive');
                 
-                if(isConnected) conn.send({ type: 'fire', p: pos, d: dir, wt: gun.type });
-                // 槍口後座力動畫
+                if(isConnected) conn.send({ type: 'fire', p: pos, d: {x: dir.x, y: dir.y, z: dir.z}, wt: gun.type });
                 player.userData.weaponHand.position.z = -0.3;
                 setTimeout(() => player.userData.weaponHand.position.z = -0.5, 50);
             } else {
@@ -328,18 +321,32 @@
                 if(player.position.distanceTo(remotePlayer.position) < melee.range + 1.2) {
                     if(isConnected) conn.send({ type: 'hit', dmg: melee.damage });
                 }
-                // 揮動動畫
                 player.userData.weaponHand.rotation.x = -1;
                 setTimeout(() => player.userData.weaponHand.rotation.x = 0, 150);
             }
             updateHUD();
         }
 
-        function spawnBullet(pos, dir, owner, isExp = false) {
+        // 重點修復函數：解決 dir.clone 報錯
+        function spawnBullet(pos, dirData, owner, isExp = false) {
+            // 確保方向是 THREE.Vector3 物件，因為 P2P 傳輸會變成一般 Object
+            let dirVector;
+            if (dirData instanceof THREE.Vector3) {
+                dirVector = dirData.clone();
+            } else {
+                dirVector = new THREE.Vector3(dirData.x, dirData.y, dirData.z);
+            }
+
             const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), new THREE.MeshBasicMaterial({ color: isExp ? 0xff4400 : 0xffff00 }));
             b.position.copy(pos);
             scene.add(b);
-            bullets.push({ mesh: b, dir: dir.clone().multiplyScalar(isExp ? 0.2 : 2.5), owner, born: Date.now(), isExp });
+            bullets.push({ 
+                mesh: b, 
+                dir: dirVector.multiplyScalar(isExp ? 0.2 : 2.5), 
+                owner, 
+                born: Date.now(), 
+                isExp 
+            });
         }
 
         function animate() {
@@ -347,14 +354,12 @@
             const time = Date.now();
 
             if(!isGameOver && isConnected) {
-                // 自動回血
                 if(time - lastRegenTime > 1000) {
                     health = Math.min(100, health + config.regenRate);
                     lastRegenTime = time;
                     updateHUD();
                 }
 
-                // 移動與走路動畫
                 let isMoving = keys.w || keys.s || keys.a || keys.d;
                 if (isMoving) {
                     const move = new THREE.Vector3();
@@ -362,12 +367,10 @@
                     if(keys.a) move.x -= 1; if(keys.d) move.x += 1;
                     move.normalize().multiplyScalar(config.playerSpeed).applyQuaternion(player.quaternion);
                     player.position.add(move);
-
-                    // 呼吸感 (相機微動)
                     camera.position.y = 1.8 + Math.sin(time * 0.01) * 0.05;
                 }
 
-                // 遠端角色動畫 (模擬)
+                // 更新遠端模型動畫
                 const walkCycle = Math.sin(time * 0.01) * 0.5;
                 const limbs = remotePlayer.userData.limbs;
                 limbs.leftArm.rotation.x = -walkCycle;
@@ -375,7 +378,6 @@
                 limbs.leftLeg.rotation.x = walkCycle;
                 limbs.rightLeg.rotation.x = -walkCycle;
 
-                // 醫療包檢索
                 for(let i=medkits.length-1; i>=0; i--) {
                     medkits[i].rotation.y += 0.03;
                     if(player.position.distanceTo(medkits[i].position) < 1.5) {
@@ -404,7 +406,6 @@
                 }
             }
 
-            // 子彈物理
             for(let i=bullets.length-1; i>=0; i--) {
                 const b = bullets[i];
                 b.mesh.position.add(b.dir);
@@ -420,7 +421,6 @@
             renderer.render(scene, camera);
         }
 
-        // --- 基礎聯網與 UI 邏輯 (同前版但微調) ---
         function initNetwork() {
             peer = new Peer();
             peer.on('open', id => {
@@ -443,9 +443,19 @@
                 updateWeaponModel();
             });
             conn.on('data', data => {
-                if(data.type === 'move') { remotePlayer.position.copy(data.p); remotePlayer.rotation.y = data.ry; }
-                else if(data.type === 'fire') { spawnBullet(data.p, data.d, false, data.wt === 'explosive'); }
-                else if(data.type === 'hit') { health -= data.dmg; if(health <= 0) { health=0; notifyGameOver(false); } updateHUD(); }
+                if(data.type === 'move') { 
+                    remotePlayer.position.copy(data.p); 
+                    remotePlayer.rotation.y = data.ry; 
+                }
+                else if(data.type === 'fire') { 
+                    // 接收遠端子彈資料
+                    spawnBullet(data.p, data.d, false, data.wt === 'explosive'); 
+                }
+                else if(data.type === 'hit') { 
+                    health -= data.dmg; 
+                    if(health <= 0) { health=0; notifyGameOver(false); } 
+                    updateHUD(); 
+                }
                 else if(data.type === 'game_over') notifyGameOver(true);
                 else if(data.type === 'ready') { remoteReady = data.val; checkRestart(); }
             });
