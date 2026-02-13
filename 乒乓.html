@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 乒乓球：模式疊加瘋狂版</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { background: #000; display: block; margin: 0 auto; border: 4px solid #334155; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,0.8); touch-action: none; }
+        .dot { height: 8px; width: 8px; background-color: #22c55e; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        
+        /* 模式按鈕優化 */
+        .menu-btn { 
+            @apply w-full py-4 bg-slate-800/50 hover:bg-slate-700/80 rounded-2xl font-bold transition-all duration-200 mb-3 text-left px-6 flex justify-between items-center border-2 border-slate-700;
+        }
+        .menu-btn:hover { transform: translateY(-2px); @apply border-slate-500; }
+        
+        /* 激活狀態：強烈視覺回饋 */
+        .menu-btn.active { 
+            @apply border-indigo-400 bg-indigo-600/30 shadow-[0_0_20px_rgba(99,102,241,0.4)];
+        }
+        
+        .win-modal { @apply fixed inset-0 bg-black/95 flex flex-col items-center justify-center z-[60] backdrop-blur-md; }
+        .neon-text { text-shadow: 0 0 10px rgba(99, 102, 241, 0.8); }
+        
+        /* 自定義 Checkbox 視覺 */
+        .checkbox-box { 
+            @apply w-6 h-6 border-2 border-slate-500 rounded-lg flex items-center justify-center transition-all duration-300 mr-4;
+        }
+        .active .checkbox-box { 
+            @apply border-indigo-300 bg-indigo-500 shadow-[0_0_10px_rgba(165,180,252,0.8)];
+        }
+        .checkmark {
+            @apply opacity-0 scale-50 transition-all duration-300 text-white font-bold;
+        }
+        .active .checkmark {
+            @apply opacity-100 scale-100;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+
+    <!-- 大廳介面 -->
+    <div id="lobby" class="bg-slate-900 p-8 rounded-2xl shadow-2xl w-96 z-10 border border-slate-700">
+        <h1 class="text-3xl font-extrabold mb-6 text-center text-indigo-400 tracking-tight neon-text">P2P 乒乓大戰</h1>
+        <div class="mb-6">
+            <p class="text-xs text-slate-500 mb-2 uppercase tracking-widest font-bold">你的連線 ID</p>
+            <div class="flex items-center space-x-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <code id="my-id" class="flex-1 text-amber-400 font-mono text-sm font-bold">正在取得 ID...</code>
+                <button id="copy-btn" class="text-xs bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded font-bold transition">複製</button>
+            </div>
+        </div>
+        <div class="space-y-4">
+            <input type="text" id="peer-id" placeholder="輸入對手 ID" class="w-full p-3 rounded-lg bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white">
+            <button id="connect-btn" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 rounded-lg font-bold transition">連線對手</button>
+            <p id="status-text" class="text-center text-sm text-slate-400 italic">等待建立連線...</p>
+        </div>
+    </div>
+
+    <!-- 遊戲模式主選單 (疊加版) -->
+    <div id="mode-menu" class="hidden fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 backdrop-blur-md">
+        <div class="bg-slate-900 p-8 rounded-3xl shadow-2xl w-[520px] border border-slate-700">
+            <div class="mb-6 text-center">
+                <h2 class="text-3xl font-black text-white italic tracking-tighter">自定義模式疊加</h2>
+                <div id="menu-instruction" class="inline-block mt-2 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest"></div>
+            </div>
+            
+            <div id="menu-options" class="grid grid-cols-1 gap-1 pointer-events-none opacity-40">
+                <button class="menu-btn" onclick="toggleMode('classic')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span class="text-lg">經典模式</span>
+                            <span class="text-[10px] text-slate-400 font-normal">基本 10 分制，無特殊效果</span>
+                        </div>
+                    </div>
+                </button>
+                <div class="flex items-center my-2">
+                    <div class="flex-1 h-px bg-slate-800"></div>
+                    <span class="mx-3 text-[10px] text-slate-600 font-bold uppercase tracking-widest">瘋狂變體</span>
+                    <div class="flex-1 h-px bg-slate-800"></div>
+                </div>
+                <button class="menu-btn" onclick="toggleMode('speed')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span>瘋狂速度</span>
+                            <span class="text-[10px] text-slate-400 font-normal">球速極快且劇烈增量</span>
+                        </div>
+                    </div>
+                </button>
+                <button class="menu-btn" onclick="toggleMode('split')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span>分裂模式</span>
+                            <span class="text-[10px] text-slate-400 font-normal">擊中球拍有機率產生分裂球</span>
+                        </div>
+                    </div>
+                </button>
+                <button class="menu-btn" onclick="toggleMode('wave')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span>巨幅正弦波</span>
+                            <span class="text-[10px] text-slate-400 font-normal">隨機 0-3.5x 振幅的詭異曲線</span>
+                        </div>
+                    </div>
+                </button>
+                <button class="menu-btn" onclick="toggleMode('portal')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span>傳送門模式</span>
+                            <span class="text-[10px] text-slate-400 font-normal">觸碰上下邊緣會隨機水平位移</span>
+                        </div>
+                    </div>
+                </button>
+                <button class="menu-btn" onclick="toggleMode('dark')">
+                    <div class="flex items-center">
+                        <div class="checkbox-box"><span class="checkmark">✓</span></div>
+                        <div class="flex flex-col">
+                            <span>閃爍黑夜</span>
+                            <span class="text-[10px] text-slate-400 font-normal">球體在飛行中會週期性隱身</span>
+                        </div>
+                    </div>
+                </button>
+
+                <button id="start-match-btn" class="w-full py-4 mt-6 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-black text-xl transition-all shadow-lg shadow-indigo-900/40 transform active:scale-95">
+                    開始瘋狂對戰
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 獲勝結算畫面 -->
+    <div id="win-screen" class="win-modal hidden">
+        <h2 id="winner-text" class="text-6xl font-black mb-4 uppercase italic tracking-tighter">P1 WINS!</h2>
+        <p id="rematch-status" class="text-indigo-400 mb-8 font-bold tracking-widest uppercase">等待重賽確認...</p>
+        <button id="rematch-btn" class="px-12 py-4 bg-white text-black font-black rounded-full hover:bg-indigo-400 transition transform hover:scale-110">要求重賽</button>
+    </div>
+
+    <!-- 遊戲容器 -->
+    <div id="game-container" class="hidden text-center">
+        <div class="flex justify-between items-center mb-6 px-4 w-[850px]">
+            <div class="w-1/3 text-left">
+                <p class="text-[10px] text-blue-500 font-black tracking-widest uppercase">PLAYER 1</p>
+                <div class="text-5xl font-mono font-black" id="p1-score">0</div>
+            </div>
+            <div class="w-1/3 flex flex-col items-center">
+                <div id="current-mode-label" class="bg-indigo-600/30 px-4 py-1.5 rounded-full text-[10px] text-indigo-300 mb-2 font-black tracking-widest uppercase border border-indigo-500/30 truncate max-w-full">CLASSIC</div>
+                <div class="text-[10px] text-slate-500 font-bold uppercase"><span class="dot"></span> SYNCING</div>
+            </div>
+            <div class="w-1/3 text-right">
+                <p class="text-[10px] text-rose-500 font-black tracking-widest uppercase">PLAYER 2</p>
+                <div class="text-5xl font-mono font-black" id="p2-score">0</div>
+            </div>
+        </div>
+        <canvas id="pong" width="800" height="400"></canvas>
+    </div>
+
+    <script>
+        const PADDLE_W = 12;
+        const WIN_SCORE = 10;
+        
+        const MODES_CONFIG = {
+            classic: { name: "經典", paddleH: 85, speedMult: 1, speedIncr: 0.25 },
+            speed: { name: "瘋狂", paddleH: 85, speedMult: 1.8, speedIncr: 0.8 },
+            split: { name: "分裂", splitProb: 0.25 },
+            wave: { name: "波動", baseWaveAmp: 15 },
+            portal: { name: "傳送", portalProb: 0.3 },
+            dark: { name: "隱身" }
+        };
+
+        let selectedModes = new Set(['classic']);
+        let peer, conn, isHost = false, amIDecider = false;
+        let p1Rematch = false, p2Rematch = false;
+        let balls = [];
+        let gameState = {
+            modes: ['classic'],
+            p1y: 150, p2y: 150,
+            p1Score: 0, p2Score: 0,
+            active: false, winner: null,
+            time: 0
+        };
+
+        const canvas = document.getElementById('pong');
+        const ctx = canvas.getContext('2d');
+
+        peer = new Peer();
+        peer.on('open', id => document.getElementById('my-id').innerText = id);
+        peer.on('connection', c => { conn = c; isHost = true; setupWebRTC(); });
+        document.getElementById('connect-btn').onclick = () => {
+            const rid = document.getElementById('peer-id').value.trim();
+            if (!rid) return;
+            conn = peer.connect(rid); isHost = false; setupWebRTC();
+        };
+
+        function setupWebRTC() {
+            conn.on('open', () => {
+                document.getElementById('lobby').classList.add('hidden');
+                document.getElementById('win-screen').classList.add('hidden');
+                document.getElementById('mode-menu').classList.remove('hidden');
+                if (isHost) {
+                    amIDecider = Math.random() < 0.5;
+                    conn.send({ type: 'ROLE', amIDecider: !amIDecider });
+                    initMenuUI();
+                }
+            });
+
+            conn.on('data', data => {
+                if (data.type === 'ROLE') { amIDecider = data.amIDecider; initMenuUI(); }
+                else if (data.type === 'START') startMatch(data.modes);
+                else if (data.type === 'SYNC') { gameState = data.state; balls = data.balls; if (gameState.winner) showWinScreen(); }
+                else if (data.type === 'INPUT') { if (isHost) gameState.p2y = data.y; }
+                else if (data.type === 'REMATCH_REQ') {
+                    if (isHost) { p2Rematch = true; checkRematch(); }
+                    else { p1Rematch = true; document.getElementById('rematch-status').innerText = "對手已同意，等待你按下重賽..."; }
+                }
+                else if (data.type === 'RESET_LOBBY') resetToLobby();
+            });
+        }
+
+        function initMenuUI() {
+            const inst = document.getElementById('menu-instruction');
+            const opts = document.getElementById('menu-options');
+            if (amIDecider) {
+                inst.innerText = "你是決策者 🎮";
+                inst.className = "inline-block mt-2 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse";
+                opts.style.opacity = "1"; opts.style.pointerEvents = "auto";
+            } else {
+                inst.innerText = "等待對手挑選中...";
+                inst.className = "inline-block mt-2 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest bg-slate-800 text-slate-500 border border-slate-700";
+            }
+            updateCheckboxes();
+        }
+
+        function toggleMode(m) {
+            if (!amIDecider) return;
+            if (m === 'classic') {
+                selectedModes.clear();
+                selectedModes.add('classic');
+            } else {
+                selectedModes.delete('classic');
+                if (selectedModes.has(m)) selectedModes.delete(m);
+                else selectedModes.add(m);
+                
+                if (selectedModes.size === 0) selectedModes.add('classic');
+            }
+            updateCheckboxes();
+        }
+
+        function updateCheckboxes() {
+            const btns = document.querySelectorAll('.menu-btn');
+            const modeKeys = ['classic', 'speed', 'split', 'wave', 'portal', 'dark'];
+            btns.forEach((btn, idx) => {
+                if (selectedModes.has(modeKeys[idx])) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        }
+
+        document.getElementById('start-match-btn').onclick = () => {
+            if (!amIDecider) return;
+            const modes = Array.from(selectedModes);
+            conn.send({ type: 'START', modes: modes });
+            startMatch(modes);
+        };
+
+        function startMatch(modes) {
+            gameState.modes = modes;
+            gameState.p1Score = 0; gameState.p2Score = 0;
+            gameState.winner = null; gameState.active = true;
+            p1Rematch = false; p2Rematch = false;
+
+            document.getElementById('mode-menu').classList.add('hidden');
+            document.getElementById('win-screen').classList.add('hidden');
+            document.getElementById('game-container').classList.remove('hidden');
+            
+            const names = modes.map(m => MODES_CONFIG[m].name);
+            document.getElementById('current-mode-label').innerText = names.join(' + ');
+
+            if (isHost) { balls = []; spawnBall(); gameLoop(); }
+            else { gameLoop(); }
+
+            const move = y => {
+                const rect = canvas.getBoundingClientRect();
+                const paddleH = MODES_CONFIG.classic.paddleH;
+                const targetY = Math.max(0, Math.min(canvas.height - paddleH, y - rect.top - paddleH/2));
+                if (isHost) gameState.p1y = targetY;
+                else { gameState.p2y = targetY; conn.send({ type: 'INPUT', y: targetY }); }
+            };
+            window.onmousemove = e => move(e.clientY);
+            window.ontouchmove = e => { move(e.touches[0].clientY); e.preventDefault(); };
+        }
+
+        function spawnBall(x = 400, y = 200, dx = null, dy = null) {
+            const isSpeed = gameState.modes.includes('speed');
+            const isWave = gameState.modes.includes('wave');
+            const speedMult = isSpeed ? MODES_CONFIG.speed.speedMult : MODES_CONFIG.classic.speedMult;
+            const dir = dx ? (dx > 0 ? 1 : -1) : (Math.random() > 0.5 ? 1 : -1);
+            const waveAmp = isWave ? (MODES_CONFIG.wave.baseWaveAmp * (Math.random() * 3.5)) : 0;
+
+            balls.push({
+                x, y,
+                baseDx: dir * 4 * speedMult,
+                baseDy: dy || (Math.random() - 0.5) * 8 * speedMult,
+                size: 8,
+                phase: Math.random() * Math.PI * 2,
+                amp: waveAmp
+            });
+        }
+
+        function update() {
+            if (!isHost || !gameState.active || gameState.winner) return;
+            gameState.time += 0.05;
+
+            const isWave = gameState.modes.includes('wave');
+            const isSpeed = gameState.modes.includes('speed');
+            const isSplit = gameState.modes.includes('split');
+            const isPortal = gameState.modes.includes('portal');
+            const paddleH = MODES_CONFIG.classic.paddleH;
+            const speedIncr = isSpeed ? MODES_CONFIG.speed.speedIncr : MODES_CONFIG.classic.speedIncr;
+
+            for (let i = balls.length - 1; i >= 0; i--) {
+                let b = balls[i];
+                if (isWave) {
+                    b.x += b.baseDx;
+                    let waveOffset = Math.sin(gameState.time * 6 + b.phase) * b.amp;
+                    b.y += (b.baseDy * 0.4) + waveOffset;
+                } else {
+                    b.x += b.baseDx;
+                    b.y += b.baseDy;
+                }
+                if (b.y <= 0) { b.y = 0; b.baseDy *= -1; }
+                if (b.y >= canvas.height - b.size) { b.y = canvas.height - b.size; b.baseDy *= -1; }
+
+                if (b.x <= PADDLE_W && b.baseDx < 0) {
+                    if (b.y > gameState.p1y - b.size && b.y < gameState.p1y + paddleH) {
+                        b.baseDx = Math.abs(b.baseDx) + speedIncr;
+                        b.x = PADDLE_W;
+                        if (isSplit && Math.random() < MODES_CONFIG.split.splitProb) spawnBall(b.x, b.y, -b.baseDx, -b.baseDy);
+                    } else if (b.x < -20) {
+                        gameState.p2Score++; balls.splice(i, 1);
+                        if (balls.length === 0) checkScore(); continue;
+                    }
+                }
+                if (b.x >= canvas.width - PADDLE_W - b.size && b.baseDx > 0) {
+                    if (b.y > gameState.p2y - b.size && b.y < gameState.p2y + paddleH) {
+                        b.baseDx = -(Math.abs(b.baseDx) + speedIncr);
+                        b.x = canvas.width - PADDLE_W - b.size;
+                        if (isSplit && Math.random() < MODES_CONFIG.split.splitProb) spawnBall(b.x, b.y, -b.baseDx, -b.baseDy);
+                    } else if (b.x > canvas.width + 20) {
+                        gameState.p1Score++; balls.splice(i, 1);
+                        if (balls.length === 0) checkScore(); continue;
+                    }
+                }
+                if (isPortal && (b.y <= 0 || b.y >= canvas.height - b.size)) {
+                    if (Math.random() < MODES_CONFIG.portal.portalProb) b.x = Math.random() * (canvas.width - 200) + 100;
+                }
+            }
+            conn.send({ type: 'SYNC', state: gameState, balls: balls });
+        }
+
+        function checkScore() {
+            const s1 = gameState.p1Score, s2 = gameState.p2Score;
+            if ((s1 >= WIN_SCORE || s2 >= WIN_SCORE) && Math.abs(s1 - s2) >= 2) {
+                gameState.winner = s1 > s2 ? 1 : 2;
+                gameState.active = false; showWinScreen();
+            } else { spawnBall(); }
+        }
+
+        function showWinScreen() {
+            const winEl = document.getElementById('win-screen');
+            winEl.classList.remove('hidden');
+            document.getElementById('winner-text').innerText = `PLAYER ${gameState.winner} WINS!`;
+            document.getElementById('winner-text').className = `text-6xl font-black mb-4 italic ${gameState.winner === 1 ? 'text-blue-500' : 'text-rose-500'}`;
+            if (isHost) document.getElementById('rematch-status').innerText = (p1Rematch && p2Rematch) ? "重啟中..." : "等待重賽確認...";
+        }
+
+        document.getElementById('rematch-btn').onclick = () => {
+            if (isHost) { p1Rematch = true; checkRematch(); }
+            else { conn.send({ type: 'REMATCH_REQ' }); p1Rematch = true; }
+            document.getElementById('rematch-status').innerText = "已發送重賽請求...";
+        };
+
+        function checkRematch() { if (isHost && p1Rematch && p2Rematch) { conn.send({ type: 'RESET_LOBBY' }); resetToLobby(); } }
+
+        function resetToLobby() {
+            gameState.p1Score = 0; gameState.p2Score = 0; gameState.winner = null;
+            p1Rematch = false; p2Rematch = false;
+            document.getElementById('win-screen').classList.add('hidden');
+            document.getElementById('game-container').classList.add('hidden');
+            document.getElementById('mode-menu').classList.remove('hidden');
+            if (isHost) { amIDecider = Math.random() < 0.5; conn.send({ type: 'ROLE', amIDecider: !amIDecider }); initMenuUI(); }
+        }
+
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.setLineDash([10, 15]); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height); ctx.stroke(); ctx.setLineDash([]);
+
+            const paddleH = MODES_CONFIG.classic.paddleH;
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#3b82f6'; ctx.shadowColor = '#3b82f6';
+            ctx.fillRect(0, gameState.p1y, PADDLE_W, paddleH);
+            ctx.fillStyle = '#f43f5e'; ctx.shadowColor = '#f43f5e';
+            ctx.fillRect(canvas.width - PADDLE_W, gameState.p2y, PADDLE_W, paddleH);
+
+            ctx.shadowBlur = 10; ctx.shadowColor = '#fff'; ctx.fillStyle = '#fff';
+            let visible = true;
+            if (gameState.modes.includes('dark')) visible = Math.floor(gameState.time * 2) % 3 !== 0;
+
+            if (visible) {
+                balls.forEach(b => {
+                    ctx.beginPath();
+                    ctx.arc(b.x + b.size/2, b.y + b.size/2, b.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            ctx.shadowBlur = 0;
+            document.getElementById('p1-score').innerText = gameState.p1Score;
+            document.getElementById('p2-score').innerText = gameState.p2Score;
+        }
+
+        function gameLoop() { update(); draw(); if (gameState.active || gameState.winner) requestAnimationFrame(gameLoop); }
+
+        document.getElementById('copy-btn').onclick = () => {
+            const t = document.getElementById('my-id').innerText;
+            const ta = document.createElement("textarea");
+            ta.value = t; ta.style.position = "fixed"; ta.style.left = "-9999px";
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            try { document.execCommand('copy'); } catch(e) {}
+            document.body.removeChild(ta);
+        };
+    </script>
+</body>
+</html>

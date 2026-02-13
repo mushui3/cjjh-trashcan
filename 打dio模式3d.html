@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D P2P 多人競技場 - 模型優化版</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; z-index: 100; pointer-events: none; }
+        #menu, #death-screen {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95); padding: 30px; border-radius: 15px;
+            color: white; text-align: center; z-index: 200; border: 2px solid #3498db; width: 450px;
+            pointer-events: auto;
+        }
+        #death-screen { display: none; border-color: #f1c40f; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            border: 2px solid #00ff00; border-radius: 50%; transform: translate(-50%, -50%);
+            pointer-events: none; display: none; z-index: 150;
+        }
+        #crosshair::after { content: ''; position: absolute; top: 50%; left: 50%; width: 2px; height: 2px; background: #00ff00; transform: translate(-50%, -50%); }
+        
+        .weapon-config { margin: 15px 0; border-top: 1px solid #444; padding-top: 10px; }
+        .weapon-select { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+        .weapon-btn { 
+            background: #2c3e50; border: 1px solid #34495e; color: white; padding: 8px; cursor: pointer; font-size: 12px;
+        }
+        .weapon-btn.active { background: #3498db; border-color: #fff; }
+
+        input, button { margin: 10px 0; padding: 12px; border-radius: 5px; border: none; width: 100%; box-sizing: border-box; }
+        #connect-btn, #restart-btn { background: #2ecc71; color: white; font-weight: bold; cursor: pointer; }
+        
+        .hud-info { background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+        #health-display { color: #e74c3c; font-size: 20px; font-weight: bold; }
+        #inventory { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+        .inv-slot { width: 60px; height: 60px; background: rgba(0,0,0,0.7); border: 2px solid #555; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; }
+        .inv-slot.active { border-color: #3498db; background: rgba(52, 152, 219, 0.3); }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div class="hud-info">血量: <span id="health-display">100</span> / 100</div>
+        <div class="hud-info">當前武器: <span id="weapon-name" style="color:#3498db">---</span></div>
+        <div class="hud-info">彈藥: <span id="ammo-display">---</span></div>
+        <div id="status-msg" style="color: #2ecc71;"></div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="inventory">
+        <div id="slot-1" class="inv-slot active">1: 槍械</div>
+        <div id="slot-2" class="inv-slot">2: 近戰</div>
+    </div>
+
+    <div id="menu">
+        <h2>戰場設定</h2>
+        <div id="status">正在載入 PeerJS...</div>
+        <div id="peer-id-display">ID: ---</div>
+        
+        <div class="weapon-config">
+            <div style="text-align: left;">1. 遠程武器選擇：</div>
+            <div class="weapon-select">
+                <button class="weapon-btn active" onclick="configWeapon('gun', 'rifle', event)">步槍</button>
+                <button class="weapon-btn" onclick="configWeapon('gun', 'mg', event)">機槍</button>
+                <button class="weapon-btn" onclick="configWeapon('gun', 'shotgun', event)">散彈槍</button>
+                <button class="weapon-btn" onclick="configWeapon('gun', 'grenade', event)">榴彈</button>
+            </div>
+        </div>
+
+        <div class="weapon-config">
+            <div style="text-align: left;">2. 近戰武器選擇：</div>
+            <div class="weapon-select">
+                <button class="weapon-btn active" onclick="configWeapon('melee', 'axe', event)">斧頭</button>
+                <button class="weapon-btn" onclick="configWeapon('melee', 'dagger', event)">匕首</button>
+                <button class="weapon-btn" onclick="configWeapon('melee', 'sword', event)">長劍</button>
+            </div>
+        </div>
+
+        <input type="text" id="remote-id" placeholder="貼上對手的 ID">
+        <button id="connect-btn">開始連線</button>
+    </div>
+
+    <div id="death-screen">
+        <h2 id="death-msg">遊戲結束</h2>
+        <p id="game-result"></p>
+        <button id="restart-btn">重新開始</button>
+        <div id="ready-status" style="color: #f1c40f; margin-top:10px;"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
+    <script>
+        const config = {
+            playerSpeed: 0.15,
+            jumpForce: 0.22,
+            gravity: 0.01,
+            regenRate: 1,
+            medkitHeal: 20
+        };
+
+        const GUNS = {
+            rifle: { name: "步槍", fireRate: 150, reloadTime: 1200, magSize: 30, startAmmo: 90, type: 'bullet' },
+            mg: { name: "機槍", fireRate: 80, reloadTime: 2000, magSize: 100, startAmmo: 200, type: 'bullet' },
+            shotgun: { name: "散彈槍", fireRate: 800, reloadTime: 1500, magSize: 8, startAmmo: 32, type: 'spread' },
+            grenade: { name: "榴彈", fireRate: 1500, reloadTime: 2500, magSize: 1, startAmmo: 3, type: 'explosive' }
+        };
+
+        const MELEE = {
+            axe: { name: "斧頭", damage: 50, rate: 2000, range: 1.0 }, 
+            dagger: { name: "匕首", damage: 15, rate: 500, range: 0.5 }, 
+            sword: { name: "長劍", damage: 25, rate: 1000, range: 2.0 }  
+        };
+
+        let scene, camera, renderer;
+        let player, remotePlayer, peer, conn;
+        let isConnected = false, isGameOver = false;
+        let myReady = false, remoteReady = false;
+        
+        let selectedGunKey = 'rifle';
+        let selectedMeleeKey = 'axe';
+        let currentSlot = 1;
+
+        let ammoInMag = 0, ammoTotal = 0, health = 100;
+        let bullets = [], particles = [], medkits = [];
+        const keys = { w: false, a: false, s: false, d: false, r: false, ' ': false };
+        let lastActionTime = 0, isReloading = false, lastRegenTime = 0;
+        let verticalVelocity = 0, isGrounded = true;
+
+        init();
+
+        function createCharacter(color) {
+            const group = new THREE.Group();
+            
+            // 軀幹
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.3), new THREE.MeshStandardMaterial({ color }));
+            body.position.y = 1.2;
+            group.add(body);
+
+            // 頭
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshStandardMaterial({ color: 0xffdbac }));
+            head.position.y = 1.8;
+            group.add(head);
+
+            // 四肢 (為了方便動畫，分別建立組)
+            const limbs = {};
+            const limbGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
+            const limbMat = new THREE.MeshStandardMaterial({ color });
+
+            limbs.leftArm = new THREE.Mesh(limbGeo, limbMat);
+            limbs.leftArm.position.set(-0.4, 1.2, 0);
+            group.add(limbs.leftArm);
+
+            limbs.rightArm = new THREE.Mesh(limbGeo, limbMat);
+            limbs.rightArm.position.set(0.4, 1.2, 0);
+            group.add(limbs.rightArm);
+
+            limbs.leftLeg = new THREE.Mesh(limbGeo, limbMat);
+            limbs.leftLeg.position.set(-0.2, 0.45, 0);
+            group.add(limbs.leftLeg);
+
+            limbs.rightLeg = new THREE.Mesh(limbGeo, limbMat);
+            limbs.rightLeg.position.set(0.2, 0.45, 0);
+            group.add(limbs.rightLeg);
+
+            group.userData.limbs = limbs;
+            return group;
+        }
+
+        function createWeaponModel(type, key) {
+            const group = new THREE.Group();
+            if (type === 'gun') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+                barrel.position.z = -0.3;
+                group.add(body, barrel);
+            } else {
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.05), new THREE.MeshStandardMaterial({ color: 0x4b2d1f }));
+                group.add(handle);
+                if (key === 'axe') {
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.05), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+                    blade.position.y = 0.2;
+                    group.add(blade);
+                } else if (key === 'dagger') {
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+                    blade.position.y = 0.3;
+                    group.add(blade);
+                } else if (key === 'sword') {
+                    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.8, 0.02), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                    blade.position.y = 0.5;
+                    group.add(blade);
+                }
+            }
+            return group;
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050508);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(10, 50, 10);
+            scene.add(sun);
+
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+            scene.add(new THREE.GridHelper(200, 50, 0x3498db, 0x111111));
+
+            // 地圖元素
+            for(let i=0; i<15; i++) {
+                const h = Math.random()*5+2;
+                const b = new THREE.Mesh(new THREE.BoxGeometry(4, h, 4), new THREE.MeshStandardMaterial({ color: 0x1a252f }));
+                b.position.set(Math.random()*120-60, h/2, Math.random()*120-60);
+                scene.add(b);
+            }
+
+            // 自己
+            player = new THREE.Group();
+            player.position.set(0, 0, 15);
+            scene.add(player);
+            player.add(camera);
+            camera.position.set(0, 1.8, 0);
+
+            // 手部武器容器 (第一人稱看不到自己身體，但能看到武器)
+            const weaponHand = new THREE.Group();
+            weaponHand.position.set(0.4, 1.4, -0.5);
+            camera.add(weaponHand);
+            player.userData.weaponHand = weaponHand;
+
+            // 遠端玩家
+            remotePlayer = createCharacter(0xe74c3c);
+            remotePlayer.position.y = -50;
+            scene.add(remotePlayer);
+
+            // 醫療包
+            spawnMedkits();
+
+            // 事件與聯網
+            initControls();
+            initNetwork();
+            animate();
+        }
+
+        function spawnMedkits() {
+            medkits.forEach(m => scene.remove(m));
+            medkits = [];
+            for(let i=0; i<10; i++) {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x2ecc71 }));
+                m.position.set(Math.random()*150-75, 0.3, Math.random()*150-75);
+                scene.add(m);
+                medkits.push(m);
+            }
+        }
+
+        function configWeapon(type, key, event) {
+            if(type === 'gun') selectedGunKey = key;
+            else selectedMeleeKey = key;
+            const btns = event.target.parentElement.querySelectorAll('.weapon-btn');
+            btns.forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            updateWeaponModel();
+        }
+
+        function switchSlot(slot) {
+            if(isReloading) return;
+            currentSlot = slot;
+            document.querySelectorAll('.inv-slot').forEach(s => s.classList.remove('active'));
+            document.getElementById('slot-' + slot).classList.add('active');
+            updateWeaponModel();
+            updateHUD();
+        }
+
+        function updateWeaponModel() {
+            const hand = player.userData.weaponHand;
+            while(hand.children.length > 0) hand.remove(hand.children[0]);
+            const model = createWeaponModel(currentSlot === 1 ? 'gun' : 'melee', currentSlot === 1 ? selectedGunKey : selectedMeleeKey);
+            hand.add(model);
+        }
+
+        function initControls() {
+            window.addEventListener('resize', onResize);
+            document.addEventListener('keydown', (e) => { if(!isGameOver) keys[e.key.toLowerCase()] = true; });
+            document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+            renderer.domElement.addEventListener('click', () => { if(!isGameOver && isConnected) renderer.domElement.requestPointerLock(); });
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mousedown', () => { if(document.pointerLockElement === renderer.domElement) handleAttack(); });
+            document.getElementById('restart-btn').onclick = () => {
+                myReady = true;
+                document.getElementById('restart-btn').disabled = true;
+                if(conn) conn.send({ type: 'ready', val: true });
+                checkRestart();
+            };
+        }
+
+        function handleAttack() {
+            const now = Date.now();
+            if(currentSlot === 1) {
+                const gun = GUNS[selectedGunKey];
+                if(now - lastActionTime < gun.fireRate || isReloading || ammoInMag <= 0) return;
+                lastActionTime = now;
+                ammoInMag--;
+                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+                const pos = player.position.clone().add(new THREE.Vector3(0, 1.6, 0));
+                
+                if(gun.type === 'spread') {
+                    for(let i=-2; i<=2; i++) {
+                        const sDir = dir.clone().applyAxisAngle(new THREE.Vector3(0,1,0), (i*5)*(Math.PI/180));
+                        spawnBullet(pos, sDir, true);
+                    }
+                } else spawnBullet(pos, dir, true, gun.type === 'explosive');
+                
+                if(isConnected) conn.send({ type: 'fire', p: pos, d: dir, wt: gun.type });
+                // 槍口後座力動畫
+                player.userData.weaponHand.position.z = -0.3;
+                setTimeout(() => player.userData.weaponHand.position.z = -0.5, 50);
+            } else {
+                const melee = MELEE[selectedMeleeKey];
+                if(now - lastActionTime < melee.rate) return;
+                lastActionTime = now;
+                if(player.position.distanceTo(remotePlayer.position) < melee.range + 1.2) {
+                    if(isConnected) conn.send({ type: 'hit', dmg: melee.damage });
+                }
+                // 揮動動畫
+                player.userData.weaponHand.rotation.x = -1;
+                setTimeout(() => player.userData.weaponHand.rotation.x = 0, 150);
+            }
+            updateHUD();
+        }
+
+        function spawnBullet(pos, dir, owner, isExp = false) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), new THREE.MeshBasicMaterial({ color: isExp ? 0xff4400 : 0xffff00 }));
+            b.position.copy(pos);
+            scene.add(b);
+            bullets.push({ mesh: b, dir: dir.clone().multiplyScalar(isExp ? 0.2 : 2.5), owner, born: Date.now(), isExp });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now();
+
+            if(!isGameOver && isConnected) {
+                // 自動回血
+                if(time - lastRegenTime > 1000) {
+                    health = Math.min(100, health + config.regenRate);
+                    lastRegenTime = time;
+                    updateHUD();
+                }
+
+                // 移動與走路動畫
+                let isMoving = keys.w || keys.s || keys.a || keys.d;
+                if (isMoving) {
+                    const move = new THREE.Vector3();
+                    if(keys.w) move.z -= 1; if(keys.s) move.z += 1;
+                    if(keys.a) move.x -= 1; if(keys.d) move.x += 1;
+                    move.normalize().multiplyScalar(config.playerSpeed).applyQuaternion(player.quaternion);
+                    player.position.add(move);
+
+                    // 呼吸感 (相機微動)
+                    camera.position.y = 1.8 + Math.sin(time * 0.01) * 0.05;
+                }
+
+                // 遠端角色動畫 (模擬)
+                const walkCycle = Math.sin(time * 0.01) * 0.5;
+                const limbs = remotePlayer.userData.limbs;
+                limbs.leftArm.rotation.x = -walkCycle;
+                limbs.rightArm.rotation.x = walkCycle;
+                limbs.leftLeg.rotation.x = walkCycle;
+                limbs.rightLeg.rotation.x = -walkCycle;
+
+                // 醫療包檢索
+                for(let i=medkits.length-1; i>=0; i--) {
+                    medkits[i].rotation.y += 0.03;
+                    if(player.position.distanceTo(medkits[i].position) < 1.5) {
+                        health = Math.min(100, health + config.medkitHeal);
+                        scene.remove(medkits[i]);
+                        medkits.splice(i, 1);
+                        updateHUD();
+                    }
+                }
+
+                if(keys[' '] && isGrounded) { verticalVelocity = config.jumpForce; isGrounded = false; }
+                verticalVelocity -= config.gravity;
+                player.position.y += verticalVelocity;
+                if(player.position.y <= 0) { player.position.y = 0; verticalVelocity = 0; isGrounded = true; }
+
+                if(keys.r && currentSlot === 1 && !isReloading && ammoInMag < GUNS[selectedGunKey].magSize && ammoTotal > 0) {
+                    isReloading = true;
+                    document.getElementById('status-msg').innerText = "填裝中...";
+                    setTimeout(() => {
+                        const needed = GUNS[selectedGunKey].magSize - ammoInMag;
+                        const took = Math.min(needed, ammoTotal);
+                        ammoInMag += took; ammoTotal -= took;
+                        isReloading = false; document.getElementById('status-msg').innerText = "";
+                        updateHUD();
+                    }, GUNS[selectedGunKey].reloadTime);
+                }
+            }
+
+            // 子彈物理
+            for(let i=bullets.length-1; i>=0; i--) {
+                const b = bullets[i];
+                b.mesh.position.add(b.dir);
+                if(b.owner && b.mesh.position.distanceTo(remotePlayer.position.clone().add(new THREE.Vector3(0,1.2,0))) < 1.0) {
+                    conn.send({ type: 'hit', dmg: Math.floor(Math.random()*3)+8 });
+                    scene.remove(b.mesh); bullets.splice(i, 1);
+                    continue;
+                }
+                if(time - b.born > 2000) { scene.remove(b.mesh); bullets.splice(i, 1); }
+            }
+
+            if(isConnected && conn.open) conn.send({ type: 'move', p: player.position, ry: player.rotation.y });
+            renderer.render(scene, camera);
+        }
+
+        // --- 基礎聯網與 UI 邏輯 (同前版但微調) ---
+        function initNetwork() {
+            peer = new Peer();
+            peer.on('open', id => {
+                document.getElementById('status').innerText = "網路已就緒";
+                document.getElementById('peer-id-display').innerText = "ID: " + id;
+            });
+            peer.on('connection', c => setupConn(c));
+            document.getElementById('connect-btn').onclick = () => {
+                const rid = document.getElementById('remote-id').value;
+                if(rid) setupConn(peer.connect(rid));
+            };
+        }
+
+        function setupConn(c) {
+            conn = c;
+            conn.on('open', () => {
+                isConnected = true;
+                document.getElementById('menu').style.display = 'none';
+                resetGame();
+                updateWeaponModel();
+            });
+            conn.on('data', data => {
+                if(data.type === 'move') { remotePlayer.position.copy(data.p); remotePlayer.rotation.y = data.ry; }
+                else if(data.type === 'fire') { spawnBullet(data.p, data.d, false, data.wt === 'explosive'); }
+                else if(data.type === 'hit') { health -= data.dmg; if(health <= 0) { health=0; notifyGameOver(false); } updateHUD(); }
+                else if(data.type === 'game_over') notifyGameOver(true);
+                else if(data.type === 'ready') { remoteReady = data.val; checkRestart(); }
+            });
+        }
+
+        function resetGame() {
+            health = 100; isGameOver = false; myReady = false; remoteReady = false;
+            const gun = GUNS[selectedGunKey];
+            ammoInMag = gun.magSize; ammoTotal = gun.startAmmo;
+            player.position.set(Math.random()*20-10, 0, 20);
+            updateHUD();
+        }
+
+        function notifyGameOver(win) {
+            isGameOver = true; document.exitPointerLock();
+            document.getElementById('death-screen').style.display = 'block';
+            document.getElementById('game-result').innerText = win ? "你贏了！" : "你輸了！";
+            if(!win && conn) conn.send({ type: 'game_over' });
+        }
+
+        function checkRestart() {
+            if(myReady && remoteReady) {
+                document.getElementById('death-screen').style.display = 'none';
+                document.getElementById('restart-btn').disabled = false;
+                resetGame();
+                spawnMedkits();
+            }
+        }
+
+        function updateHUD() {
+            const weapon = (currentSlot === 1) ? GUNS[selectedGunKey] : MELEE[selectedMeleeKey];
+            document.getElementById('weapon-name').innerText = weapon.name;
+            document.getElementById('ammo-display').innerText = (currentSlot === 1) ? `${ammoInMag} / ${ammoTotal}` : "---";
+            document.getElementById('health-display').innerText = Math.floor(health);
+        }
+
+        function onMouseMove(e) {
+            if(document.pointerLockElement === renderer.domElement && !isGameOver) {
+                player.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x -= e.movementY * 0.002;
+                camera.rotation.x = Math.max(-1.5, Math.min(1.5, camera.rotation.x));
+            }
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
