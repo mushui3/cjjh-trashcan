@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 多樣幾何物理實驗室</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'JetBrains Mono', monospace; transition: background-color 0.5s; }
+        canvas { display: block; }
+        
+        .ui-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            background: rgba(15, 15, 15, 0.85);
+            backdrop-filter: blur(15px);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            user-select: none;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            z-index: 100;
+        }
+
+        body.light-mode { background-color: #f0f0f0; }
+        .light-mode .ui-panel {
+            background: rgba(255, 255, 255, 0.85);
+            color: #111;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .control-group { margin-bottom: 12px; }
+        label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; color: #999; }
+        .light-mode label { color: #555; }
+        
+        input[type="range"] { width: 100%; cursor: pointer; accent-color: #3b82f6; }
+        input[type="color"] { width: 100%; height: 28px; border: none; background: none; cursor: pointer; }
+        select { width: 100%; background: #222; color: white; border: 1px solid #444; padding: 5px; border-radius: 4px; font-size: 12px; }
+        .light-mode select { background: #fff; color: #111; border-color: #ccc; }
+
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 15px; }
+        .action-btn { 
+            padding: 8px; border-radius: 6px; font-size: 11px; font-weight: bold; 
+            transition: all 0.2s; text-align: center; cursor: pointer;
+        }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-mode { background: #6366f1; color: white; }
+
+        .section-title { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #3b82f6; margin: 15px 0 8px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+        .hint { position: absolute; bottom: 20px; left: 20px; color: #666; font-size: 11px; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        <h2 class="text-lg font-bold mb-1">3D Physical Lab Pro</h2>
+        <div class="mode-selector">
+            <div id="mode-float" class="mode-btn active" onclick="setMode('float')">漂浮</div>
+            <div id="mode-physics" class="mode-btn" onclick="setMode('physics')">物理</div>
+        </div>
+
+        <div class="section-title">場景環境</div>
+        <button onclick="toggleTheme()" class="action-btn btn-mode w-full mb-3">切換亮/暗模式</button>
+        
+        <div class="control-group">
+            <label>重力強度 <span id="val-gravity">1.0</span></label>
+            <input type="range" id="gravitySlider" min="0" max="3" step="0.1" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <label>碰撞彈性 (Bounce) <span id="val-bounce">0.5</span></label>
+            <input type="range" id="bounceSlider" min="0" max="1" step="0.05" value="0.5">
+        </div>
+
+        <div class="section-title">光源控制 (SpotLight)</div>
+        <div class="control-group">
+            <label>亮度 <span id="val-int">5.0</span></label>
+            <input type="range" id="lightIntensity" min="0" max="20" step="0.5" value="5" oninput="updateLight()">
+        </div>
+        <div class="control-group">
+            <label>Angle (錐角) <span id="val-angle">0.52</span></label>
+            <input type="range" id="lightAngle" min="0.1" max="1.0" step="0.01" value="0.52" oninput="updateLight()">
+        </div>
+        <div class="control-group">
+            <label>Penumbra (邊緣) <span id="val-penumbra">0.3</span></label>
+            <input type="range" id="lightPenumbra" min="0" max="1" step="0.05" value="0.3" oninput="updateLight()">
+        </div>
+
+        <div class="section-title">物件生成設定</div>
+        <div class="control-group">
+            <label>形狀選擇</label>
+            <select id="shapeType">
+                <option value="cube">正方體 (Cube)</option>
+                <option value="sphere">球體 (Sphere)</option>
+                <option value="cone">圓錐體 (Cone)</option>
+                <option value="tetra">三角錐 (Tetrahedron)</option>
+                <option value="prism">三角柱 (Prism)</option>
+                <option value="rect">長方形 (Rectangle)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>生成數量 <span id="val-count">1</span></label>
+            <input type="range" id="spawnCount" min="1" max="100" step="1" value="1">
+        </div>
+
+        <div class="section-title">外觀自訂 (新物件)</div>
+        <div class="control-group">
+            <label>顏色</label>
+            <input type="color" id="cubeColor" value="#3b82f6">
+        </div>
+        <div class="control-group">
+            <label>材質效果</label>
+            <select id="matType">
+                <option value="standard">標準 (Standard)</option>
+                <option value="glass">玻璃 (Refraction)</option>
+                <option value="emissive">發光 (Neon)</option>
+                <option value="wireframe">線框 (Wireframe)</option>
+            </select>
+        </div>
+
+        <div class="section-title">操作</div>
+        <div class="btn-grid">
+            <button onclick="spawnShapes()" class="action-btn btn-primary">生成物件</button>
+            <button onclick="resetEverything()" class="action-btn btn-danger">清空所有</button>
+        </div>
+    </div>
+
+    <div class="hint">左鍵: 抓取 & 拋擲 | 右鍵: 旋轉鏡頭 | 滾輪: 縮放</div>
+
+    <script>
+        let scene, camera, renderer, spotLight, ambientLight, floor;
+        let objects = [];
+        let mode = 'float';
+        let isDarkMode = true;
+
+        // 物理參數
+        let baseGravity = -0.015;
+        let currentGravityMult = 1.0;
+        let currentBounce = 0.5;
+        const FRICTION = 0.95;
+        const FLOOR_Y = -3;
+
+        // 互動狀態
+        let selectedObj = null;
+        let isDragging = false;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let prevMousePos = { x: 0, y: 0 };
+        let dragPlane = new THREE.Plane();
+        let dragOffset = new THREE.Vector3();
+        let intersectPoint = new THREE.Vector3();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050505);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 10, 18);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 開啟柔和陰影
+            document.body.appendChild(renderer.domElement);
+
+            // 地板
+            floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(300, 300),
+                new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = FLOOR_Y;
+            floor.receiveShadow = true; // 地板接收陰影
+            scene.add(floor);
+
+            const grid = new THREE.GridHelper(200, 80, 0x444444, 0x111111);
+            grid.position.y = FLOOR_Y + 0.01;
+            scene.add(grid);
+
+            // 光源
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+            scene.add(ambientLight);
+
+            spotLight = new THREE.SpotLight(0xffffff, 5);
+            spotLight.position.set(20, 35, 20);
+            spotLight.castShadow = true;
+            spotLight.angle = 0.52;
+            spotLight.penumbra = 0.3;
+            spotLight.decay = 2;
+            spotLight.distance = 200;
+            
+            // 陰影細節設定
+            spotLight.shadow.mapSize.set(2048, 2048);
+            spotLight.shadow.camera.near = 0.5;
+            spotLight.shadow.camera.far = 500;
+            spotLight.shadow.bias = -0.0001;
+            scene.add(spotLight);
+
+            // 初始物件
+            createShape('cube', 0, 0, 0, 1.5, "#3b82f6", "standard");
+
+            setupUI();
+            
+            window.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+            window.addEventListener('wheel', (e) => {
+                camera.position.multiplyScalar(e.deltaY > 0 ? 1.05 : 0.95);
+            });
+            window.addEventListener('resize', onResize);
+            
+            animate();
+        }
+
+        function createShape(type, x, y, z, size, color, matType) {
+            let geo;
+            let collisionRadius = size / 2;
+
+            switch(type) {
+                case 'sphere':
+                    geo = new THREE.SphereGeometry(size/2, 32, 32);
+                    break;
+                case 'cone':
+                    geo = new THREE.ConeGeometry(size/2, size, 32);
+                    break;
+                case 'tetra':
+                    geo = new THREE.TetrahedronGeometry(size/2);
+                    break;
+                case 'prism':
+                    geo = new THREE.CylinderGeometry(size/2, size/2, size, 3);
+                    break;
+                case 'rect':
+                    geo = new THREE.BoxGeometry(size * 1.5, size * 0.5, size * 0.8);
+                    collisionRadius = size * 0.7;
+                    break;
+                default:
+                    geo = new THREE.BoxGeometry(size, size, size);
+            }
+
+            let mat;
+            const base = { color, metalness: 0.7, roughness: 0.2 };
+            if (matType === 'glass') mat = new THREE.MeshPhysicalMaterial({...base, transmission: 0.9, thickness: 1});
+            else if (matType === 'emissive') mat = new THREE.MeshStandardMaterial({...base, emissive: color, emissiveIntensity: 2});
+            else if (matType === 'wireframe') mat = new THREE.MeshStandardMaterial({...base, wireframe: true});
+            else mat = new THREE.MeshStandardMaterial(base);
+
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true; // 物件投射陰影
+            mesh.receiveShadow = true; // 物件間互相接收陰影
+            
+            mesh.userData = {
+                vel: new THREE.Vector3(0, 0, 0),
+                angVel: new THREE.Vector3(0, 0, 0),
+                size: size,
+                radius: collisionRadius,
+                mass: size * size * size
+            };
+
+            scene.add(mesh);
+            objects.push(mesh);
+            return mesh;
+        }
+
+        function spawnShapes() {
+            const count = parseInt(document.getElementById('spawnCount').value);
+            const type = document.getElementById('shapeType').value;
+            const color = document.getElementById('cubeColor').value;
+            const mat = document.getElementById('matType').value;
+
+            for(let i = 0; i < count; i++) {
+                const size = 0.5 + Math.random() * 1.5;
+                const rx = (Math.random() - 0.5) * 20;
+                const ry = 8 + Math.random() * 20;
+                const rz = (Math.random() - 0.5) * 20;
+                createShape(type, rx, ry, rz, size, color, mat);
+            }
+        }
+
+        function setupUI() {
+            document.getElementById('gravitySlider').addEventListener('input', (e) => {
+                currentGravityMult = parseFloat(e.target.value);
+                document.getElementById('val-gravity').innerText = currentGravityMult.toFixed(1);
+            });
+            document.getElementById('bounceSlider').addEventListener('input', (e) => {
+                currentBounce = parseFloat(e.target.value);
+                document.getElementById('val-bounce').innerText = currentBounce.toFixed(2);
+            });
+            document.getElementById('spawnCount').addEventListener('input', (e) => {
+                document.getElementById('val-count').innerText = e.target.value;
+            });
+        }
+
+        function updateLight() {
+            const intensity = parseFloat(document.getElementById('lightIntensity').value);
+            const angle = parseFloat(document.getElementById('lightAngle').value);
+            const penumbra = parseFloat(document.getElementById('lightPenumbra').value);
+            
+            spotLight.intensity = intensity;
+            spotLight.angle = angle;
+            spotLight.penumbra = penumbra;
+            
+            document.getElementById('val-int').innerText = intensity.toFixed(1);
+            document.getElementById('val-angle').innerText = angle.toFixed(2);
+            document.getElementById('val-penumbra').innerText = penumbra.toFixed(2);
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.querySelectorAll('.mode-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(`mode-${m}`).classList.add('active');
+            objects.forEach(c => {
+                c.userData.vel.set(0,0,0);
+                c.userData.angVel.set(0,0,0);
+            });
+        }
+
+        function toggleTheme() {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('light-mode');
+            scene.background = new THREE.Color(isDarkMode ? 0x050505 : 0xf0f0f0);
+            floor.material.color.set(isDarkMode ? 0x222222 : 0xdddddd);
+            ambientLight.intensity = isDarkMode ? 0.3 : 0.7;
+        }
+
+        function resetEverything() {
+            objects.forEach(c => scene.remove(c));
+            objects = [];
+        }
+
+        function onMouseDown(e) {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            
+            const hits = raycaster.intersectObjects(objects);
+            if (hits.length > 0) {
+                isDragging = true;
+                selectedObj = hits[0].object;
+                selectedObj.userData.vel.set(0, 0, 0);
+                selectedObj.userData.angVel.set(0, 0, 0);
+                
+                const normal = camera.getWorldDirection(new THREE.Vector3()).negate();
+                dragPlane.setFromNormalAndCoplanarPoint(normal, selectedObj.position);
+                if (raycaster.ray.intersectPlane(dragPlane, intersectPoint)) {
+                    dragOffset.copy(intersectPoint).sub(selectedObj.position);
+                }
+            }
+            prevMousePos = { x: e.clientX, y: e.clientY };
+        }
+
+        function onMouseMove(e) {
+            if (isDragging && selectedObj) {
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                
+                if (raycaster.ray.intersectPlane(dragPlane, intersectPoint)) {
+                    const targetPos = new THREE.Vector3().copy(intersectPoint).sub(dragOffset);
+                    selectedObj.userData.vel.copy(targetPos).sub(selectedObj.position).multiplyScalar(0.4);
+                    selectedObj.position.copy(targetPos);
+                }
+                
+                const dx = e.clientX - prevMousePos.x;
+                const dy = e.clientY - prevMousePos.y;
+                selectedObj.rotation.y += dx * 0.01;
+                selectedObj.rotation.x += dy * 0.01;
+                selectedObj.userData.angVel.set(dy * 0.02, dx * 0.02, 0);
+
+            } else if (e.buttons === 2) {
+                const dx = e.clientX - prevMousePos.x;
+                const dy = e.clientY - prevMousePos.y;
+                const r = camera.position.length();
+                let theta = Math.atan2(camera.position.x, camera.position.z) - dx * 0.005;
+                let phi = Math.acos(camera.position.y / r) - dy * 0.005;
+                phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
+                camera.position.set(r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.cos(theta));
+                camera.lookAt(0, 0, 0);
+            }
+            prevMousePos = { x: e.clientX, y: e.clientY };
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function handleCollisions() {
+            const count = objects.length;
+            for (let i = 0; i < count; i++) {
+                const a = objects[i];
+                const rA = a.userData.radius;
+
+                // 地板碰撞
+                if (a.position.y < FLOOR_Y + rA) {
+                    a.position.y = FLOOR_Y + rA;
+                    if (mode === 'physics') {
+                        a.userData.vel.y *= -currentBounce;
+                        a.userData.vel.x *= FRICTION;
+                        a.userData.vel.z *= FRICTION;
+                        a.userData.angVel.multiplyScalar(0.9);
+                    } else {
+                        a.userData.vel.y *= -1;
+                    }
+                }
+
+                // 物件間碰撞
+                for (let j = i + 1; j < count; j++) {
+                    const b = objects[j];
+                    const rB = b.userData.radius;
+                    const diff = new THREE.Vector3().subVectors(a.position, b.position);
+                    const dist = diff.length();
+                    const minDist = rA + rB;
+
+                    if (dist < minDist) {
+                        const collisionNormal = diff.normalize();
+                        const overlap = minDist - dist;
+                        const separation = collisionNormal.clone().multiplyScalar(overlap / 2);
+                        
+                        a.position.add(separation);
+                        b.position.sub(separation);
+
+                        const relativeVel = new THREE.Vector3().subVectors(a.userData.vel, b.userData.vel);
+                        const velocityAlongNormal = relativeVel.dot(collisionNormal);
+
+                        if (velocityAlongNormal < 0) {
+                            let impulseMag = -(1 + currentBounce) * velocityAlongNormal;
+                            impulseMag /= (1 / a.userData.mass + 1 / b.userData.mass);
+
+                            const impulse = collisionNormal.clone().multiplyScalar(impulseMag);
+                            a.userData.vel.add(impulse.clone().multiplyScalar(1 / a.userData.mass));
+                            b.userData.vel.sub(impulse.clone().multiplyScalar(1 / b.userData.mass));
+                            
+                            a.userData.angVel.add(new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).multiplyScalar(impulseMag * 0.1));
+                        }
+                    }
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            objects.forEach(c => {
+                if (isDragging && c === selectedObj) return;
+
+                const ud = c.userData;
+                
+                if (mode === 'physics') {
+                    if (c.position.y > FLOOR_Y + ud.radius + 0.05) {
+                        ud.vel.y += baseGravity * currentGravityMult;
+                    }
+                } else {
+                    ud.angVel.x = ud.angVel.x * 0.98 + 0.0005;
+                }
+
+                c.position.add(ud.vel);
+                c.rotation.x += ud.angVel.x;
+                c.rotation.y += ud.angVel.y;
+                c.rotation.z += ud.angVel.z;
+
+                ud.vel.multiplyScalar(0.98);
+                ud.angVel.multiplyScalar(0.97);
+
+                if (ud.vel.length() < 0.001) ud.vel.set(0,0,0);
+                if (ud.angVel.length() < 0.001) ud.angVel.set(0,0,0);
+            });
+
+            handleCollisions();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+        window.oncontextmenu = (e) => e.preventDefault();
+    </script>
+</body>
+</html>
