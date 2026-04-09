@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>現代井字棋 - 雙人與 AI 模式</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --player-x: #38bdf8;
+            --player-o: #f472b6;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            min-height: 100vh;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .glass {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .cell {
+            aspect-ratio: 1 / 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid transparent;
+        }
+
+        .cell:hover:not(.occupied) {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: scale(0.98);
+        }
+
+        .cell.occupied {
+            cursor: default;
+        }
+
+        .cell.x { color: var(--player-x); text-shadow: 0 0 15px rgba(56, 189, 248, 0.5); }
+        .cell.o { color: var(--player-o); text-shadow: 0 0 15px rgba(244, 114, 182, 0.5); }
+
+        .winning-line {
+            background: rgba(255, 255, 255, 0.15) !important;
+            transform: scale(1.05) !important;
+            box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.1);
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-pop {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        /* 隱藏原生按鈕輪廓 */
+        button:focus { outline: none; }
+    </style>
+</head>
+<body>
+
+    <div class="max-w-md w-full p-6">
+        <div class="glass p-8 space-y-8">
+            <!-- Header -->
+            <div class="text-center">
+                <h1 class="text-3xl font-bold tracking-tight mb-2">井字棋遊戲</h1>
+                <p class="text-slate-400 text-sm">挑戰無懈可擊的 AI</p>
+            </div>
+
+            <!-- Mode Switcher -->
+            <div class="flex bg-slate-900/50 p-1 rounded-xl">
+                <button id="pvp-btn" class="flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all bg-white/10 text-white">
+                    雙人對戰
+                </button>
+                <button id="pvc-btn" class="flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-white">
+                    對抗電腦 (AI)
+                </button>
+            </div>
+
+            <!-- Status -->
+            <div class="flex justify-between items-center">
+                <div id="status-text" class="text-lg font-semibold italic">輪到 X 玩家</div>
+                <div id="turn-badge" class="status-badge bg-sky-500/20 text-sky-400 border border-sky-500/30">Player X</div>
+            </div>
+
+            <!-- Game Board -->
+            <div id="board" class="grid grid-cols-3 gap-3">
+                <div class="cell" data-index="0"></div>
+                <div class="cell" data-index="1"></div>
+                <div class="cell" data-index="2"></div>
+                <div class="cell" data-index="3"></div>
+                <div class="cell" data-index="4"></div>
+                <div class="cell" data-index="5"></div>
+                <div class="cell" data-index="6"></div>
+                <div class="cell" data-index="7"></div>
+                <div class="cell" data-index="8"></div>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex gap-4 pt-4">
+                <button id="reset-btn" class="flex-1 py-3 px-6 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold transition-colors">
+                    重新開始
+                </button>
+            </div>
+        </div>
+
+        <!-- Score / Footer -->
+        <div class="mt-8 grid grid-cols-2 gap-4 text-center">
+            <div class="glass py-3">
+                <div class="text-xs text-slate-400 uppercase">玩家 X (或你)</div>
+                <div id="score-x" class="text-xl font-bold">0</div>
+            </div>
+            <div class="glass py-3">
+                <div class="text-xs text-slate-400 uppercase">玩家 O (或 AI)</div>
+                <div id="score-o" class="text-xl font-bold">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 訊息提示容器 -->
+    <div id="toast-container" class="fixed bottom-8 left-1/2 -translate-x-1/2 pointer-events-none"></div>
+
+    <script>
+        // 常數與狀態
+        const X_CLASS = 'x';
+        const O_CLASS = 'o';
+        const WINNING_COMBINATIONS = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8], // 橫向
+            [0, 3, 6], [1, 4, 7], [2, 5, 8], // 縱向
+            [0, 4, 8], [2, 4, 6]             // 斜向
+        ];
+
+        let isAiMode = false;
+        let xTurn = true;
+        let boardState = Array(9).fill(null);
+        let gameActive = true;
+        let scores = { x: 0, o: 0 };
+
+        // DOM 元素
+        const cells = document.querySelectorAll('.cell');
+        const board = document.getElementById('board');
+        const statusText = document.getElementById('status-text');
+        const turnBadge = document.getElementById('turn-badge');
+        const pvpBtn = document.getElementById('pvp-btn');
+        const pvcBtn = document.getElementById('pvc-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const scoreXText = document.getElementById('score-x');
+        const scoreOText = document.getElementById('score-o');
+
+        // 初始化
+        initGame();
+
+        function initGame() {
+            cells.forEach(cell => {
+                cell.classList.remove(X_CLASS, O_CLASS, 'occupied', 'winning-line');
+                cell.innerText = '';
+                cell.addEventListener('click', handleCellClick, { once: true });
+            });
+            boardState = Array(9).fill(null);
+            xTurn = true;
+            gameActive = true;
+            updateUI();
+        }
+
+        function handleCellClick(e) {
+            const cell = e.target;
+            const index = cell.dataset.index;
+
+            if (!gameActive || boardState[index]) return;
+
+            // 玩家放置
+            placeMark(cell, index, xTurn ? X_CLASS : O_CLASS);
+
+            if (checkWin(boardState, xTurn ? X_CLASS : O_CLASS)) {
+                endGame(false);
+            } else if (isDraw()) {
+                endGame(true);
+            } else {
+                swapTurns();
+                
+                // 如果是 AI 模式，輪到 O 時進行計算
+                if (isAiMode && !xTurn && gameActive) {
+                    board.style.pointerEvents = 'none'; // 鎖定操作
+                    setTimeout(aiMove, 400);
+                }
+            }
+        }
+
+        function placeMark(cell, index, currentClass) {
+            boardState[index] = currentClass;
+            cell.innerText = currentClass.toUpperCase();
+            cell.classList.add(currentClass, 'occupied', 'animate-pop');
+        }
+
+        function swapTurns() {
+            xTurn = !xTurn;
+            updateUI();
+        }
+
+        function updateUI() {
+            const currentPlayer = xTurn ? 'X' : 'O';
+            statusText.innerText = `輪到 ${currentPlayer} 玩家`;
+            
+            if (xTurn) {
+                turnBadge.innerText = 'Player X';
+                turnBadge.className = 'status-badge bg-sky-500/20 text-sky-400 border border-sky-500/30';
+            } else {
+                turnBadge.innerText = isAiMode ? 'Computing...' : 'Player O';
+                turnBadge.className = 'status-badge bg-pink-500/20 text-pink-400 border border-pink-500/30';
+            }
+        }
+
+        function checkWin(currentBoard, player) {
+            return WINNING_COMBINATIONS.some(combination => {
+                return combination.every(index => {
+                    return currentBoard[index] === player;
+                });
+            });
+        }
+
+        function getWinningIndices(currentBoard, player) {
+            return WINNING_COMBINATIONS.find(combination => {
+                return combination.every(index => {
+                    return currentBoard[index] === player;
+                });
+            });
+        }
+
+        function isDraw() {
+            return boardState.every(cell => cell !== null);
+        }
+
+        function endGame(draw) {
+            gameActive = false;
+            board.style.pointerEvents = 'none';
+
+            if (draw) {
+                statusText.innerText = '雙方平手！';
+                turnBadge.innerText = 'DRAW';
+                turnBadge.className = 'status-badge bg-slate-500/20 text-slate-400 border border-slate-500/30';
+            } else {
+                const winner = xTurn ? 'X' : 'O';
+                statusText.innerText = `玩家 ${winner} 勝利！`;
+                turnBadge.innerText = 'WINNER';
+                
+                // 加亮獲勝線
+                const winIndices = getWinningIndices(boardState, xTurn ? X_CLASS : O_CLASS);
+                winIndices.forEach(idx => cells[idx].classList.add('winning-line'));
+
+                // 更新分數
+                if (xTurn) scores.x++; else scores.o++;
+                scoreXText.innerText = scores.x;
+                scoreOText.innerText = scores.o;
+            }
+        }
+
+        // --- Minimax AI 邏輯 ---
+
+        function aiMove() {
+            const bestMoveIndex = minimax(boardState, O_CLASS).index;
+            const cell = cells[bestMoveIndex];
+            
+            placeMark(cell, bestMoveIndex, O_CLASS);
+            
+            if (checkWin(boardState, O_CLASS)) {
+                endGame(false);
+            } else if (isDraw()) {
+                endGame(true);
+            } else {
+                swapTurns();
+            }
+            board.style.pointerEvents = 'auto';
+        }
+
+        function minimax(newBoard, player) {
+            const availSpots = newBoard.map((v, i) => v === null ? i : null).filter(v => v !== null);
+
+            // 基礎條件：檢查勝負
+            if (checkWin(newBoard, X_CLASS)) return { score: -10 };
+            if (checkWin(newBoard, O_CLASS)) return { score: 10 };
+            if (availSpots.length === 0) return { score: 0 };
+
+            const moves = [];
+
+            for (let i = 0; i < availSpots.length; i++) {
+                const move = {};
+                move.index = availSpots[i];
+                newBoard[availSpots[i]] = player;
+
+                if (player === O_CLASS) {
+                    const result = minimax(newBoard, X_CLASS);
+                    move.score = result.score;
+                } else {
+                    const result = minimax(newBoard, O_CLASS);
+                    move.score = result.score;
+                }
+
+                newBoard[availSpots[i]] = null;
+                moves.push(move);
+            }
+
+            // 尋找最佳移動
+            let bestMove;
+            if (player === O_CLASS) {
+                let bestScore = -Infinity;
+                for (let i = 0; i < moves.length; i++) {
+                    if (moves[i].score > bestScore) {
+                        bestScore = moves[i].score;
+                        bestMove = i;
+                    }
+                }
+            } else {
+                let bestScore = Infinity;
+                for (let i = 0; i < moves.length; i++) {
+                    if (moves[i].score < bestScore) {
+                        bestScore = moves[i].score;
+                        bestMove = i;
+                    }
+                }
+            }
+            return moves[bestMove];
+        }
+
+        // --- 事件監聽 ---
+
+        pvpBtn.addEventListener('click', () => {
+            isAiMode = false;
+            pvpBtn.classList.add('bg-white/10', 'text-white');
+            pvpBtn.classList.remove('text-slate-400');
+            pvcBtn.classList.remove('bg-white/10', 'text-white');
+            pvcBtn.classList.add('text-slate-400');
+            initGame();
+        });
+
+        pvcBtn.addEventListener('click', () => {
+            isAiMode = true;
+            pvcBtn.classList.add('bg-white/10', 'text-white');
+            pvcBtn.classList.remove('text-slate-400');
+            pvpBtn.classList.remove('bg-white/10', 'text-white');
+            pvpBtn.classList.add('text-slate-400');
+            initGame();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            initGame();
+            board.style.pointerEvents = 'auto';
+        });
+
+    </script>
+</body>
+</html>

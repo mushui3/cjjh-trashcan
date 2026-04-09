@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3的次方挑戰 - 三三合一</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap');
+
+        :root {
+            --bg-color: #faf8ef;
+            --grid-bg: #bbada0;
+            --cell-bg: rgba(238, 228, 218, 0.35);
+            --text-dark: #776e65;
+            --text-light: #f9f6f2;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            font-family: 'Nunito', sans-serif;
+            color: var(--text-dark);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        .game-container {
+            width: 340px;
+            height: 340px;
+            position: relative;
+            background-color: var(--grid-bg);
+            border-radius: 8px;
+            padding: 12px;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        .grid-background {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 12px;
+            width: 100%;
+            height: 100%;
+        }
+
+        .grid-cell {
+            background-color: var(--cell-bg);
+            border-radius: 4px;
+        }
+
+        .tile-container {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .tile {
+            position: absolute;
+            width: 69px;
+            height: 69px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 800;
+            transition: transform 120ms ease-in-out;
+            z-index: 1;
+        }
+
+        .tile-inner {
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: appear 200ms ease-out;
+        }
+
+        /* 3的次方配色 */
+        .tile-3 .tile-inner { background: #eee4da; color: #776e65; }
+        .tile-9 .tile-inner { background: #f2b179; color: #f9f6f2; }
+        .tile-27 .tile-inner { background: #f67c5f; color: #f9f6f2; }
+        .tile-81 .tile-inner { background: #f65e3b; color: #f9f6f2; }
+        .tile-243 .tile-inner { background: #edcf72; color: #f9f6f2; font-size: 28px; }
+        .tile-729 .tile-inner { background: #edcc61; color: #f9f6f2; font-size: 28px; }
+        .tile-2187 .tile-inner { background: #edc53f; color: #f9f6f2; font-size: 22px; }
+
+        @keyframes appear {
+            0% { opacity: 0; transform: scale(0); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .tile-merged .tile-inner {
+            animation: pop 200ms ease-in-out;
+        }
+
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(238, 228, 218, 0.8);
+            border-radius: 8px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .btn {
+            background: #8f7a66;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: 800;
+            box-shadow: 0 4px 0 #7f6a56;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="flex flex-col items-center w-full max-w-md px-4">
+        <div class="flex justify-between items-center w-full mb-6 mt-4">
+            <h1 class="text-5xl font-extrabold text-[#776e65]">3<sup>n</sup></h1>
+            <div class="flex gap-2">
+                <div class="bg-[#bbada0] px-4 py-2 rounded text-center min-w-[85px]">
+                    <div class="text-[#eee4da] text-[10px] font-bold uppercase">SCORE</div>
+                    <div id="score" class="text-white text-xl font-extrabold">0</div>
+                </div>
+                <div class="bg-[#bbada0] px-4 py-2 rounded text-center min-w-[85px]">
+                    <div class="text-[#eee4da] text-[10px] font-bold uppercase">BEST</div>
+                    <div id="best-score" class="text-white text-xl font-extrabold">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-between items-end w-full mb-6">
+            <p class="text-[#776e65] font-semibold">三個 <span class="text-black">3</span> 合成一個 <span class="text-black">9</span>！</p>
+            <button onclick="game.restart()" class="btn">新遊戲</button>
+        </div>
+
+        <div class="game-container" id="game-container">
+            <div class="grid-background">
+                <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+                <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+                <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+                <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+            </div>
+            <div id="tile-container" class="tile-container"></div>
+            <div id="game-over" class="overlay">
+                <h2 class="text-4xl font-extrabold mb-6">沒有位置了！</h2>
+                <button onclick="game.restart()" class="btn">再試一次</button>
+            </div>
+        </div>
+        <p class="mt-10 text-sm text-[#776e65] text-center">
+            這比 2048 難得多。你需要預留空間讓三個相同數字排在一起才能觸發合併。
+        </p>
+    </div>
+
+    <script>
+        class TripleMergeGame {
+            constructor() {
+                this.gridSize = 4;
+                this.container = document.getElementById('tile-container');
+                this.scoreElement = document.getElementById('score');
+                this.bestScoreElement = document.getElementById('best-score');
+                this.gameOverOverlay = document.getElementById('game-over');
+                
+                this.bestScore = localStorage.getItem('3n-best-score') || 0;
+                this.bestScoreElement.textContent = this.bestScore;
+                
+                this.init();
+            }
+
+            init() {
+                this.board = Array(this.gridSize).fill().map(() => Array(this.gridSize).fill(null));
+                this.score = 0;
+                this.over = false;
+                this.scoreElement.textContent = 0;
+                this.gameOverOverlay.style.display = 'none';
+                this.container.innerHTML = '';
+
+                this.addRandomTile();
+                this.addRandomTile();
+                this.addRandomTile();
+                this.render();
+            }
+
+            restart() { this.init(); }
+
+            addRandomTile() {
+                const emptyCells = [];
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        if (!this.board[r][c]) emptyCells.push({r, c});
+                    }
+                }
+                if (emptyCells.length > 0) {
+                    const {r, c} = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                    this.board[r][c] = {
+                        value: 3,
+                        r, c,
+                        id: Math.random().toString(36).substr(2, 9)
+                    };
+                }
+            }
+
+            render() {
+                const currentTileIds = new Set();
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        const tile = this.board[r][c];
+                        if (tile) {
+                            this.renderTile(tile);
+                            currentTileIds.add(tile.id);
+                        }
+                    }
+                }
+                const allDoms = this.container.querySelectorAll('.tile');
+                allDoms.forEach(dom => {
+                    if (!currentTileIds.has(dom.dataset.id)) dom.remove();
+                });
+
+                this.scoreElement.textContent = this.score;
+                if (this.score > this.bestScore) {
+                    this.bestScore = this.score;
+                    this.bestScoreElement.textContent = this.bestScore;
+                    localStorage.setItem('3n-best-score', this.bestScore);
+                }
+            }
+
+            renderTile(tile) {
+                let element = document.querySelector(`[data-id="${tile.id}"]`);
+                const x = tile.c * (69 + 12);
+                const y = tile.r * (69 + 12);
+
+                if (!element) {
+                    element = document.createElement('div');
+                    element.className = `tile tile-${tile.value}`;
+                    element.dataset.id = tile.id;
+                    element.innerHTML = `<div class="tile-inner">${tile.value}</div>`;
+                    this.container.appendChild(element);
+                } else {
+                    element.className = `tile tile-${tile.value} ${tile.merged ? 'tile-merged' : ''}`;
+                    element.querySelector('.tile-inner').textContent = tile.value;
+                }
+                element.style.transform = `translate(${x}px, ${y}px)`;
+            }
+
+            move(direction) {
+                if (this.over) return;
+                let moved = false;
+                
+                // 每個方向的向量
+                const vectors = [{x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}];
+                const vector = vectors[direction];
+                
+                const traversalsX = direction === 1 ? [3, 2, 1, 0] : [0, 1, 2, 3];
+                const traversalsY = direction === 2 ? [3, 2, 1, 0] : [0, 1, 2, 3];
+
+                traversalsY.forEach(r => {
+                    traversalsX.forEach(c => {
+                        const tile = this.board[r][c];
+                        if (tile) {
+                            tile.merged = false;
+                            let farthest = this.findFarthestPosition(r, c, vector);
+                            
+                            // 移動到最遠處
+                            if (farthest.r !== r || farthest.c !== c) {
+                                this.board[farthest.r][farthest.c] = tile;
+                                this.board[r][c] = null;
+                                tile.r = farthest.r;
+                                tile.c = farthest.c;
+                                moved = true;
+                            }
+                        }
+                    });
+                });
+
+                // 執行合併檢測 (移動後檢測是否有三個相鄰)
+                if (this.checkTripleMerges(direction)) moved = true;
+
+                if (moved) {
+                    this.addRandomTile();
+                    this.render();
+                    if (!this.canMove()) {
+                        this.over = true;
+                        this.gameOverOverlay.style.display = 'flex';
+                    }
+                }
+            }
+
+            // 核心邏輯：檢測三個相同的數字並合併
+            checkTripleMerges(direction) {
+                let mergedAny = false;
+                // 根據方向進行掃描合併
+                const isVertical = (direction === 0 || direction === 2);
+                
+                for (let i = 0; i < this.gridSize; i++) {
+                    let tilesInLine = [];
+                    for (let j = 0; j < this.gridSize; j++) {
+                        const r = isVertical ? j : i;
+                        const c = isVertical ? i : j;
+                        if (this.board[r][c]) tilesInLine.push(this.board[r][c]);
+                    }
+
+                    // 從擠壓的方向開始檢查（例如向左移，則從左邊開始檢查三個）
+                    if (direction === 1 || direction === 2) tilesInLine.reverse();
+
+                    for (let k = 0; k <= tilesInLine.length - 3; k++) {
+                        const t1 = tilesInLine[k];
+                        const t2 = tilesInLine[k+1];
+                        const t3 = tilesInLine[k+2];
+
+                        if (t1.value === t2.value && t2.value === t3.value) {
+                            // 進行合併：保留第一個，刪除後兩個
+                            const newValue = t1.value * 3;
+                            t1.value = newValue;
+                            t1.merged = true;
+                            this.score += newValue;
+                            
+                            this.board[t2.r][t2.c] = null;
+                            this.board[t3.r][t3.c] = null;
+                            
+                            // 移除已處理的，避免重複合併
+                            tilesInLine.splice(k+1, 2);
+                            mergedAny = true;
+                            k--; // 重新檢查當前位置
+                        }
+                    }
+                }
+                return mergedAny;
+            }
+
+            findFarthestPosition(r, c, vector) {
+                let last;
+                do {
+                    last = {r, c};
+                    r += vector.y;
+                    c += vector.x;
+                } while (this.withinBounds(r, c) && !this.board[r][c]);
+                return last;
+            }
+
+            withinBounds(r, c) { return r >= 0 && r < this.gridSize && c >= 0 && c < this.gridSize; }
+
+            canMove() {
+                // 有空位
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        if (!this.board[r][c]) return true;
+                    }
+                }
+                // 檢查是否有三個相鄰
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        const val = this.board[r][c].value;
+                        // 橫向檢查
+                        if (c < this.gridSize - 2) {
+                            if (this.board[r][c+1]?.value === val && this.board[r][c+2]?.value === val) return true;
+                        }
+                        // 縱向檢查
+                        if (r < this.gridSize - 2) {
+                            if (this.board[r+1][c]?.value === val && this.board[r+2][c]?.value === val) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        const game = new TripleMergeGame();
+        window.addEventListener('keydown', e => {
+            const map = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+            if (map[e.key] !== undefined) { e.preventDefault(); game.move(map[e.key]); }
+        });
+
+        let tsX, tsY;
+        document.addEventListener('touchstart', e => { tsX = e.touches[0].clientX; tsY = e.touches[0].clientY; }, {passive: false});
+        document.addEventListener('touchend', e => {
+            if (!tsX || !tsY) return;
+            const dx = e.changedTouches[0].clientX - tsX;
+            const dy = e.changedTouches[0].clientY - tsY;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > 20) {
+                if (Math.abs(dx) > Math.abs(dy)) game.move(dx > 0 ? 1 : 3);
+                else game.move(dy > 0 ? 2 : 0);
+            }
+            tsX = tsY = null;
+        }, {passive: false});
+    </script>
+</body>
+</html>

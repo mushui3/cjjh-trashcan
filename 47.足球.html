@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超級足球 3D - 5v5 惡搞進化版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: '微軟正黑體', sans-serif; background: #1a1a1a; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; }
+        .panel { pointer-events: auto; background: rgba(0,0,0,0.85); padding: 25px; border-radius: 16px; border: 2px solid #444; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
+        
+        #menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 380px; }
+        #hud { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 10px; }
+        #score-board { display: flex; gap: 20px; font-size: 32px; font-weight: 900; }
+        #timer { font-size: 18px; background: rgba(0,0,0,0.5); padding: 5px 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.2); }
+        
+        #event-banner { position: absolute; top: 120px; left: 50%; transform: translateX(-50%); font-size: 36px; color: #ffeb3b; text-shadow: 0 0 15px rgba(255,193,7,0.8); display: none; text-align: center; font-weight: bold; }
+
+        #status { position: absolute; bottom: 20px; left: 20px; font-size: 14px; opacity: 0.7; }
+        
+        button { 
+            width: 100%; padding: 16px; margin: 10px 0; border: none; border-radius: 12px; 
+            background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; font-weight: bold; cursor: pointer; transition: 0.3s; font-size: 18px;
+            box-shadow: 0 4px 0 #1b5e20;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 6px 0 #1b5e20; filter: brightness(1.1); }
+        button:active { transform: translateY(2px); box-shadow: 0 0 0 #1b5e20; }
+        button.secondary { background: linear-gradient(135deg, #2196f3, #1565c0); box-shadow: 0 4px 0 #0d47a1; }
+        button.danger { background: linear-gradient(135deg, #f44336, #c62828); box-shadow: 0 4px 0 #b71c1c; }
+        
+        input { width: 90%; padding: 14px; margin: 10px 0; border-radius: 8px; border: 1px solid #444; text-align: center; background: #111; color: #fff; font-size: 16px; }
+
+        .score-box { background: rgba(0,0,0,0.7); padding: 10px 30px; border-radius: 15px; border-bottom: 6px solid #fff; min-width: 120px; text-align: center; }
+        .blue { border-color: #2196f3; color: #2196f3; }
+        .red { border-color: #f44336; color: #f44336; }
+
+        #game-over-modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 320px; display: none; text-align: center; z-index: 100; }
+        #rematch-invite { position: absolute; top: 20px; right: 20px; width: 240px; display: none; }
+
+        #controls-hint { position: absolute; bottom: 20px; right: 20px; text-align: right; font-size: 13px; pointer-events: none; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 12px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="menu" class="panel">
+        <h1 style="margin:0 0 15px 0; font-size: 28px; letter-spacing: 2px;">瘋狂足球 5 vs 5</h1>
+        <button onclick="startSinglePlayer()">單人職業賽 (AI)</button>
+        <div style="margin: 20px 0; border-top: 1px solid #333; padding-top: 20px;">
+            <p style="margin: 0 0 12px 0; font-size: 14px; color: #aaa;">多人連線競技</p>
+            <div id="my-id-container" style="font-size: 12px; margin-bottom: 12px; color: #2196f3; font-family: monospace;">正在取得連線碼...</div>
+            <input type="text" id="peer-id-input" placeholder="貼上對手的連線碼">
+            <button class="secondary" onclick="connectToPeer()">加入比賽</button>
+        </div>
+    </div>
+
+    <div id="hud">
+        <div id="timer">Match Time: 00:00</div>
+        <div id="score-board">
+            <div class="score-box blue">BLUE <span id="score-blue">0</span></div>
+            <div class="score-box red">RED <span id="score-red">0</span></div>
+        </div>
+    </div>
+
+    <div id="event-banner">EVENT TRIGGERED</div>
+
+    <div id="game-over-modal" class="panel">
+        <h2 id="winner-text" style="font-size: 24px;">藍隊獲勝！</h2>
+        <button id="rematch-btn" onclick="requestRematch()">重新開始</button>
+    </div>
+
+    <div id="rematch-invite" class="panel">
+        <p style="margin-top:0">對方發起了重賽邀請</p>
+        <button onclick="acceptRematch()">接受挑戰</button>
+        <button class="danger" onclick="hideRematchInvite()">拒絕</button>
+    </div>
+
+    <div id="status">系統就緒</div>
+
+    <div id="controls-hint">
+        <b>操作指南</b><br>
+        WASD / 方向鍵：跑位移動<br>
+        Shift 鍵：強力跳躍<br>
+        滑鼠右鍵按住：旋轉戰術視角<br>
+        <span style="color:#ffeb3b">隨機事件：炸彈球、超級彈力球</span>
+    </div>
+</div>
+
+<script>
+/**
+ * 配置與常數
+ */
+const FIELD_WIDTH = 70;
+const FIELD_HEIGHT = 45;
+const GOAL_SIZE = 14;
+const BALL_RADIUS = 0.6;
+const PLAYER_RADIUS = 0.8;
+const PLAYER_SPEED = 18;
+const JUMP_FORCE = 15;
+const WINNING_SCORE = 3;
+
+let world, scene, camera, renderer, ball, ballBody, ballMaterial;
+let players = []; 
+let myPlayer = null;
+let gameState = 'menu';
+let scores = { blue: 0, red: 0 };
+let startTime = 0;
+let eventTimer = 0;
+let isElasticActive = false;
+
+let cameraRotation = 0;
+let cameraPitch = 0.6;
+let isDragging = false;
+let shakeTime = 0;
+
+// P2P
+let peer, conn;
+let isHost = true;
+
+/**
+ * 物理初始化
+ */
+function initPhysics() {
+    world = new CANNON.World();
+    world.gravity.set(0, -35, 0);
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 10;
+
+    const groundMat = new CANNON.Material("groundMat");
+    const wallMat = new CANNON.Material("wallMat");
+    ballMaterial = new CANNON.Material("ballMat");
+
+    // 牆壁碰撞材質：增加彈性系數
+    const wallBallContact = new CANNON.ContactMaterial(wallMat, ballMaterial, { friction: 0.1, restitution: 0.7 });
+    world.addContactMaterial(wallBallContact);
+
+    // 地面
+    const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: groundMat });
+    groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+    world.addBody(groundBody);
+
+    // 邊界牆壁
+    const wt = 5;
+    createWall(0, FIELD_HEIGHT/2 + wt/2, FIELD_WIDTH + wt*2, wt, wallMat); 
+    createWall(0, -(FIELD_HEIGHT/2 + wt/2), FIELD_WIDTH + wt*2, wt, wallMat); 
+    
+    // 兩側牆壁 (避開球門)
+    const sideWallLen = (FIELD_HEIGHT - GOAL_SIZE) / 2;
+    createWall(-(FIELD_WIDTH/2 + wt/2), (FIELD_HEIGHT/2 - sideWallLen/2), wt, sideWallLen, wallMat);
+    createWall(-(FIELD_WIDTH/2 + wt/2), -(FIELD_HEIGHT/2 - sideWallLen/2), wt, sideWallLen, wallMat);
+    createWall((FIELD_WIDTH/2 + wt/2), (FIELD_HEIGHT/2 - sideWallLen/2), wt, sideWallLen, wallMat);
+    createWall((FIELD_WIDTH/2 + wt/2), -(FIELD_HEIGHT/2 - sideWallLen/2), wt, sideWallLen, wallMat);
+
+    // 天花板 (防止球飛出去)
+    const ceilingBody = new CANNON.Body({ mass: 0 });
+    ceilingBody.addShape(new CANNON.Plane());
+    ceilingBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+    ceilingBody.position.set(0, 15, 0);
+    world.addBody(ceilingBody);
+}
+
+function createWall(x, z, w, d, mat) {
+    const body = new CANNON.Body({ mass: 0, material: mat });
+    body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, 10, d/2)));
+    body.position.set(x, 5, z);
+    world.addBody(body);
+}
+
+/**
+ * 3D 場景渲染
+ */
+function initScene() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111);
+    scene.fog = new THREE.Fog(0x111111, 30, 180);
+
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    sun.position.set(30, 80, 30);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    scene.add(sun);
+
+    // 草地與線條
+    const grassGeo = new THREE.PlaneGeometry(FIELD_WIDTH, FIELD_HEIGHT);
+    const grassMat = new THREE.MeshPhongMaterial({ color: 0x388e3c });
+    const grass = new THREE.Mesh(grassGeo, grassMat);
+    grass.rotation.x = -Math.PI / 2;
+    grass.receiveShadow = true;
+    scene.add(grass);
+
+    // 球場線條
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(10, 10, 1004, 1004);
+    ctx.beginPath(); ctx.moveTo(512,0); ctx.lineTo(512,1024); ctx.stroke();
+    ctx.beginPath(); ctx.arc(512, 512, 120, 0, Math.PI*2); ctx.stroke();
+    const lineTex = new THREE.CanvasTexture(canvas);
+    const lineMat = new THREE.MeshBasicMaterial({ map: lineTex, transparent: true });
+    const lineMesh = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_WIDTH-0.2, FIELD_HEIGHT-0.2), lineMat);
+    lineMesh.rotation.x = -Math.PI / 2;
+    lineMesh.position.y = 0.05;
+    scene.add(lineMesh);
+
+    // 足球
+    ball = new THREE.Mesh(
+        new THREE.SphereGeometry(BALL_RADIUS, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 })
+    );
+    ball.castShadow = true;
+    scene.add(ball);
+
+    ballBody = new CANNON.Body({
+        mass: 1.2,
+        shape: new CANNON.Sphere(BALL_RADIUS),
+        material: ballMaterial
+    });
+    ballBody.damping = 0.4;
+    ballBody.angularDamping = 0.4;
+    ballBody.position.set(0, 5, 0);
+    world.addBody(ballBody);
+
+    createGoalMesh(-(FIELD_WIDTH / 2), 0x2196f3); 
+    createGoalMesh((FIELD_WIDTH / 2), 0xf44336);
+
+    // 事件監聽
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    window.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('mousedown', e => { if (e.button === 2) isDragging = true; });
+    window.addEventListener('mouseup', e => { if (e.button === 2) isDragging = false; });
+    window.addEventListener('mousemove', e => {
+        if (isDragging) {
+            cameraRotation -= e.movementX * 0.006;
+            cameraPitch = Math.max(0.1, Math.min(1.4, cameraPitch + e.movementY * 0.006));
+        }
+    });
+}
+
+function createGoalMesh(x, color) {
+    const group = new THREE.Group();
+    const postMat = new THREE.MeshPhongMaterial({ color: 0xeeeeee });
+    const bar1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 6), postMat);
+    bar1.position.set(0, 3, GOAL_SIZE/2);
+    const bar2 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 6), postMat);
+    bar2.position.set(0, 3, -GOAL_SIZE/2);
+    const bar3 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, GOAL_SIZE), postMat);
+    bar3.position.set(0, 6, 0);
+    
+    const net = new THREE.Mesh(new THREE.BoxGeometry(2, 6, GOAL_SIZE), new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.2 }));
+    net.position.set(x < 0 ? -1 : 1, 3, 0);
+    
+    group.add(bar1, bar2, bar3, net);
+    group.position.x = x;
+    scene.add(group);
+}
+
+/**
+ * 5v5 球員系統
+ */
+function createPlayer(id, team, type, isLocal, pos) {
+    const color = team === 'blue' ? 0x2196f3 : 0xf44336;
+    const group = new THREE.Group();
+    
+    // 身體造型
+    const bodyMat = new THREE.MeshPhongMaterial({ color, shininess: 100 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(PLAYER_RADIUS, PLAYER_RADIUS * 0.8, 1.4, 16), bodyMat);
+    body.position.y = 0.7;
+    body.castShadow = true;
+    
+    const head = new THREE.Mesh(new THREE.SphereGeometry(PLAYER_RADIUS * 0.7, 16, 16), bodyMat);
+    head.position.y = 1.6;
+    head.castShadow = true;
+    
+    if (type === 'keeper') {
+        const hat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.2, 1.2), new THREE.MeshPhongMaterial({color: 0x333333}));
+        hat.position.y = 2.1;
+        group.add(hat);
+    }
+    
+    group.add(body, head);
+    scene.add(group);
+
+    const cannonBody = new CANNON.Body({ 
+        mass: 80, 
+        shape: new CANNON.Sphere(PLAYER_RADIUS), 
+        fixedRotation: true 
+    });
+    cannonBody.position.set(pos.x, 1.5, pos.z);
+    world.addBody(cannonBody);
+
+    const obj = { 
+        id, mesh: group, body: cannonBody, team, type, isLocal, 
+        isDisabled: false, disableTimer: 0, isDead: false, respawnTimer: 0, originalPos: pos,
+        passCooldown: 0
+    };
+    players.push(obj);
+    return obj;
+}
+
+function setupTeams() {
+    players.forEach(p => { scene.remove(p.mesh); world.remove(p.body); });
+    players = [];
+    scores = { blue: 0, red: 0 };
+    startTime = Date.now();
+    eventTimer = 0;
+    isElasticActive = false;
+    
+    document.getElementById('score-blue').innerText = 0;
+    document.getElementById('score-red').innerText = 0;
+    document.getElementById('game-over-modal').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+
+    // 藍隊 (5人)
+    myPlayer = createPlayer('p1', 'blue', 'player', true, { x: -10, z: 0 });
+    createPlayer('b_k', 'blue', 'keeper', false, { x: -32, z: 0 });
+    createPlayer('b1', 'blue', 'player', false, { x: -15, z: 12 });
+    createPlayer('b2', 'blue', 'player', false, { x: -15, z: -12 });
+    createPlayer('b3', 'blue', 'player', false, { x: -22, z: 0 });
+
+    // 紅隊 (5人)
+    createPlayer('r_k', 'red', 'keeper', false, { x: 32, z: 0 });
+    createPlayer('r1', 'red', 'player', false, { x: 10, z: 0 });
+    createPlayer('r2', 'red', 'player', false, { x: 18, z: 15 });
+    createPlayer('r3', 'red', 'player', false, { x: 18, z: -15 });
+    createPlayer('r4', 'red', 'player', false, { x: 25, z: 0 });
+
+    resetBall();
+}
+
+/**
+ * 惡搞事件
+ */
+function handleEvents() {
+    if (gameState === 'menu') return;
+    eventTimer++;
+    if (eventTimer > 1500) { 
+        const rand = Math.random();
+        if (rand < 0.5) triggerBomb();
+        else triggerElastic();
+        eventTimer = 0;
+    }
+}
+
+function triggerBomb() {
+    showBanner("💣 警告：炸彈球出現！3...2...1...");
+    ball.material.emissive.set(0xff0000);
+    setTimeout(() => {
+        if (gameState === 'menu') return;
+        showBanner("💥 砰！BOOM！");
+        ball.material.emissive.set(0x000000);
+        shakeTime = 30; // 相機震動
+
+        let sorted = players.filter(p => !p.isDead).sort((a,b) => 
+            a.body.position.distanceTo(ballBody.position) - b.body.position.distanceTo(ballBody.position)
+        );
+
+        if (sorted[0]) { 
+            sorted[0].isDead = true;
+            sorted[0].respawnTimer = 300;
+            sorted[0].mesh.visible = false;
+            sorted[0].body.position.y = -20;
+        }
+        if (sorted[1]) disablePlayer(sorted[1], 300);
+        if (sorted[2]) disablePlayer(sorted[2], 300);
+
+        ballBody.velocity.set((Math.random()-0.5)*60, 25, (Math.random()-0.5)*60);
+    }, 3000);
+}
+
+function triggerElastic() {
+    showBanner("🎾 超級彈力模式：只有球在彈！(15s)");
+    isElasticActive = true;
+    const oldRest = world.defaultContactMaterial.restitution;
+    world.defaultContactMaterial.restitution = 2.5; // 極高彈性
+    ball.scale.set(1.4, 1.4, 1.4);
+    setTimeout(() => {
+        isElasticActive = false;
+        world.defaultContactMaterial.restitution = oldRest;
+        ball.scale.set(1, 1, 1);
+        showBanner("彈力恢復正常");
+    }, 15000);
+}
+
+function disablePlayer(p, frames) {
+    p.isDisabled = true;
+    p.disableTimer = frames;
+    p.mesh.traverse(m => { 
+        if(m.isMesh) {
+            m.material.transparent = true;
+            m.material.opacity = 0.5;
+        }
+    });
+}
+
+function showBanner(txt) {
+    const b = document.getElementById('event-banner');
+    b.innerText = txt;
+    b.style.display = 'block';
+    setTimeout(() => b.style.display = 'none', 3000);
+}
+
+/**
+ * AI 進階邏輯 (含傳球)
+ */
+function updateAI() {
+    players.forEach(p => {
+        if (p.isLocal) return;
+
+        if (p.isDisabled) {
+            p.disableTimer--;
+            p.mesh.rotation.y += 0.2; // 旋轉效果
+            if (p.disableTimer <= 0) {
+                p.isDisabled = false;
+                p.mesh.traverse(m => { if(m.isMesh) m.material.opacity = 1.0; });
+            }
+            return;
+        }
+        if (p.isDead) {
+            p.respawnTimer--;
+            if (p.respawnTimer <= 0) {
+                p.isDead = false; p.mesh.visible = true;
+                p.body.position.set(p.originalPos.x, 1.5, p.originalPos.z);
+            }
+            return;
+        }
+
+        const distToBall = p.body.position.distanceTo(ballBody.position);
+
+        if (p.type === 'keeper') {
+            const targetZ = Math.max(-GOAL_SIZE/2, Math.min(GOAL_SIZE/2, ballBody.position.z));
+            p.body.velocity.z = (targetZ - p.body.position.z) * 6;
+            p.body.velocity.x = (p.originalPos.x - p.body.position.x) * 5;
+        } else {
+            // 球員邏輯：追球、射門或傳球
+            const isNearBall = distToBall < 15;
+            if (isNearBall) {
+                const dir = ballBody.position.vsub(p.body.position);
+                dir.y = 0; dir.normalize();
+                p.body.velocity.x = dir.x * PLAYER_SPEED * 0.85;
+                p.body.velocity.z = dir.z * PLAYER_SPEED * 0.85;
+
+                // 觸球邏輯
+                if (distToBall < 2.2) {
+                    const goalX = p.team === 'blue' ? FIELD_WIDTH/2 : -FIELD_WIDTH/2;
+                    
+                    // 傳球判斷：找尋比自己更靠近球門的隊友
+                    let teammates = players.filter(t => t.team === p.team && t.id !== p.id && !t.isDisabled && !t.isDead);
+                    let targetTeammate = teammates.find(t => 
+                        (p.team === 'blue' ? t.body.position.x > p.body.position.x + 5 : t.body.position.x < p.body.position.x - 5) &&
+                        p.body.position.distanceTo(t.body.position) < 20
+                    );
+
+                    if (targetTeammate && p.passCooldown <= 0) {
+                        // 傳球
+                        const passDir = targetTeammate.body.position.vsub(p.body.position);
+                        passDir.y = 0.2; passDir.normalize();
+                        ballBody.applyImpulse(passDir.scale(1.8), ballBody.position);
+                        p.passCooldown = 120;
+                    } else {
+                        // 射門
+                        const shoot = new CANNON.Vec3(goalX, 1.2, (Math.random()-0.5)*5).vsub(p.body.position);
+                        shoot.normalize();
+                        ballBody.applyImpulse(shoot.scale(2.5), ballBody.position);
+                    }
+                }
+            } else {
+                // 回防或跑位
+                const backDir = new CANNON.Vec3(p.originalPos.x, 1.5, p.originalPos.z).vsub(p.body.position);
+                if (backDir.length() > 2) {
+                    backDir.normalize();
+                    p.body.velocity.x = backDir.x * PLAYER_SPEED * 0.5;
+                    p.body.velocity.z = backDir.z * PLAYER_SPEED * 0.5;
+                }
+            }
+        }
+        if (p.passCooldown > 0) p.passCooldown--;
+    });
+}
+
+/**
+ * 控制與渲染循環
+ */
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+function handleInput() {
+    if (!myPlayer || myPlayer.isDisabled || myPlayer.isDead) return;
+
+    let moveX = 0, moveZ = 0;
+    if (keys['ArrowUp'] || keys['KeyW']) moveZ -= 1;
+    if (keys['ArrowDown'] || keys['KeyS']) moveZ += 1;
+    if (keys['ArrowLeft'] || keys['KeyA']) moveX -= 1;
+    if (keys['ArrowRight'] || keys['KeyD']) moveX += 1;
+
+    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraRotation);
+    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraRotation);
+    const moveDir = new THREE.Vector3().addScaledVector(forward, -moveZ).addScaledVector(right, moveX);
+    if (moveDir.length() > 0) moveDir.normalize();
+
+    myPlayer.body.velocity.x = moveDir.x * PLAYER_SPEED;
+    myPlayer.body.velocity.z = moveDir.z * PLAYER_SPEED;
+
+    // 跳躍邏輯回歸
+    if (keys['ShiftLeft'] && Math.abs(myPlayer.body.velocity.y) < 0.5) {
+        myPlayer.body.velocity.y = JUMP_FORCE;
+    }
+
+    if (myPlayer.body.position.distanceTo(ballBody.position) < 2.3) {
+        const force = ballBody.position.vsub(myPlayer.body.position);
+        force.y = 0.6; force.normalize();
+        ballBody.applyImpulse(force.scale(2.0), ballBody.position);
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    if (gameState !== 'menu') {
+        world.step(1/60);
+        handleInput();
+        updateAI();
+        handleEvents();
+        
+        // 進球判定
+        if (isHost) {
+            if (Math.abs(ballBody.position.z) < GOAL_SIZE/2) {
+                if (ballBody.position.x > FIELD_WIDTH/2) scorePoint('blue');
+                else if (ballBody.position.x < -FIELD_WIDTH/2) scorePoint('red');
+            }
+        }
+
+        // 計時器
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        document.getElementById('timer').innerText = `Match Time: ${Math.floor(elapsed/60).toString().padStart(2,'0')}:${(elapsed%60).toString().padStart(2,'0')}`;
+
+        // 同步位置
+        ball.position.copy(ballBody.position);
+        ball.quaternion.copy(ballBody.quaternion);
+        players.forEach(p => p.mesh.position.copy(p.body.position));
+
+        // 相機跟隨與震動
+        if (myPlayer) {
+            let shake = new THREE.Vector3(0,0,0);
+            if (shakeTime > 0) {
+                shake.set((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
+                shakeTime--;
+            }
+            const dist = 22;
+            const camX = myPlayer.body.position.x + Math.sin(cameraRotation) * dist;
+            const camZ = myPlayer.body.position.z + Math.cos(cameraRotation) * dist;
+            camera.position.lerp(new THREE.Vector3(camX, myPlayer.body.position.y + 15 * cameraPitch, camZ).add(shake), 0.1);
+            camera.lookAt(myPlayer.body.position.x, myPlayer.body.position.y + 2, myPlayer.body.position.z);
+        }
+
+        // P2P Sync
+        if (conn && conn.open && isHost) {
+            conn.send({
+                type: 'sync',
+                ball: { pos: ballBody.position },
+                players: players.map(p => ({ id: p.id === myPlayer.id ? 'host' : p.id, pos: p.body.position }))
+            });
+        }
+    }
+    renderer.render(scene, camera);
+}
+
+function scorePoint(team) {
+    scores[team]++;
+    document.getElementById(`score-blue`).innerText = scores.blue;
+    document.getElementById(`score-red`).innerText = scores.red;
+    if (conn) conn.send({ type: 'score', scores });
+    if (scores[team] >= WINNING_SCORE) endGame(team);
+    else resetBall();
+}
+
+function endGame(winner) {
+    document.getElementById('winner-text').innerText = `${winner === 'blue' ? "藍隊" : "紅隊"} 獲得勝利！`;
+    document.getElementById('game-over-modal').style.display = 'block';
+}
+
+function resetBall() {
+    ballBody.position.set(0, 5, 0);
+    ballBody.velocity.set(0, 0, 0);
+    ballBody.angularVelocity.set(0, 0, 0);
+}
+
+function requestRematch() {
+    if (gameState === 'single') setupTeams();
+    else if (conn && conn.open) conn.send({ type: 'rematch_request' });
+}
+
+function acceptRematch() {
+    hideRematchInvite();
+    if (conn) conn.send({ type: 'rematch_accept' });
+    setupTeams();
+}
+
+function hideRematchInvite() { document.getElementById('rematch-invite').style.display = 'none'; }
+
+function initPeer() {
+    peer = new Peer();
+    peer.on('open', id => document.getElementById('my-id-container').innerText = id);
+    peer.on('connection', c => {
+        conn = c; isHost = true;
+        setupP2PListeners();
+        gameState = 'multi';
+        document.getElementById('menu').style.display = 'none';
+        setupTeams();
+    });
+}
+
+function connectToPeer() {
+    const tid = document.getElementById('peer-id-input').value;
+    if (!tid) return;
+    conn = peer.connect(tid); isHost = false;
+    setupP2PListeners();
+}
+
+function setupP2PListeners() {
+    conn.on('open', () => {
+        document.getElementById('status').innerText = "連線成功";
+        if (!isHost) {
+            gameState = 'multi';
+            document.getElementById('menu').style.display = 'none';
+            setupTeams();
+        }
+    });
+    conn.on('data', data => {
+        if (data.type === 'sync') {
+            ballBody.position.copy(data.ball.pos);
+            data.players.forEach(pd => {
+                const p = players.find(x => x.id === pd.id);
+                if (p && !p.isLocal) p.body.position.copy(pd.pos);
+            });
+        } else if (data.type === 'rematch_request') {
+            document.getElementById('rematch-invite').style.display = 'block';
+        } else if (data.type === 'rematch_accept') {
+            setupTeams();
+        } else if (data.type === 'score') {
+            scores = data.scores;
+            document.getElementById('score-blue').innerText = scores.blue;
+            document.getElementById('score-red').innerText = scores.red;
+            if (scores.blue >= WINNING_SCORE || scores.red >= WINNING_SCORE) endGame(scores.blue >= WINNING_SCORE ? 'blue' : 'red');
+        }
+    });
+}
+
+function startSinglePlayer() {
+    gameState = 'single'; isHost = true;
+    document.getElementById('menu').style.display = 'none';
+    setupTeams();
+}
+
+window.onload = () => { initPhysics(); initScene(); initPeer(); animate(); };
+</script>
+</body>
+</html>

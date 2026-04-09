@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2048 巨型網格版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap');
+
+        :root {
+            --bg-color: #faf8ef;
+            --grid-bg: #bbada0;
+            --cell-bg: rgba(238, 228, 218, 0.35);
+            --text-dark: #776e65;
+            --text-light: #f9f6f2;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            font-family: 'Nunito', sans-serif;
+            color: var(--text-dark);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+            touch-action: none;
+        }
+
+        .game-area {
+            width: 95vw;
+            max-width: 600px;
+            aspect-ratio: 1 / 1;
+            position: relative;
+            background-color: var(--grid-bg);
+            border-radius: 8px;
+            padding: 8px;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        .grid-container {
+            display: grid;
+            width: 100%;
+            height: 100%;
+            gap: 4px;
+        }
+
+        .grid-cell {
+            background-color: var(--cell-bg);
+            border-radius: 4px;
+        }
+
+        .tile-container {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            bottom: 8px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .tile {
+            position: absolute;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            transition: transform 100ms ease-in-out;
+            z-index: 1;
+        }
+
+        .tile-inner {
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: appear 150ms ease-out;
+        }
+
+        /* 配色系統 */
+        .tile-2 .tile-inner { background: #eee4da; color: #776e65; }
+        .tile-4 .tile-inner { background: #ede0c8; color: #776e65; }
+        .tile-8 .tile-inner { background: #f2b179; color: #f9f6f2; }
+        .tile-16 .tile-inner { background: #f59563; color: #f9f6f2; }
+        .tile-32 .tile-inner { background: #f67c5f; color: #f9f6f2; }
+        .tile-64 .tile-inner { background: #f65e3b; color: #f9f6f2; }
+        .tile-128 .tile-inner { background: #edcf72; color: #f9f6f2; box-shadow: 0 0 10px rgba(237, 207, 114, 0.4); }
+        .tile-256 .tile-inner { background: #edcc61; color: #f9f6f2; box-shadow: 0 0 15px rgba(237, 204, 97, 0.5); }
+        .tile-512 .tile-inner { background: #edc850; color: #f9f6f2; box-shadow: 0 0 20px rgba(237, 200, 80, 0.6); }
+        .tile-1024 .tile-inner { background: #edc53f; color: #f9f6f2; }
+        .tile-2048 .tile-inner { background: #edc22e; color: #f9f6f2; }
+        .tile-super .tile-inner { background: #3c3a32; color: #f9f6f2; }
+
+        @keyframes appear {
+            0% { opacity: 0; transform: scale(0); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .tile-merged .tile-inner {
+            animation: pop 150ms ease-in-out;
+        }
+
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(238, 228, 218, 0.85);
+            border-radius: 8px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            text-align: center;
+        }
+
+        .btn-size {
+            background: #bbada0;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .btn-size.active {
+            background: #8f7a66;
+            font-weight: 800;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="flex flex-col items-center w-full px-4 py-6">
+        <div class="flex justify-between items-center w-full max-w-[600px] mb-4">
+            <div>
+                <h1 class="text-4xl font-extrabold text-[#776e65]">2048</h1>
+                <p class="text-sm text-[#776e65] font-bold">巨型網格挑戰</p>
+            </div>
+            <div class="flex gap-2">
+                <div class="bg-[#bbada0] px-3 py-1 rounded text-center min-w-[70px]">
+                    <div class="text-[#eee4da] text-[9px] font-bold uppercase">SCORE</div>
+                    <div id="score" class="text-white text-lg font-extrabold leading-tight">0</div>
+                </div>
+                <div class="bg-[#bbada0] px-3 py-1 rounded text-center min-w-[70px]">
+                    <div class="text-[#eee4da] text-[9px] font-bold uppercase">BEST</div>
+                    <div id="best-score" class="text-white text-lg font-extrabold leading-tight">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap justify-between items-center w-full max-w-[600px] gap-4 mb-4">
+            <div class="flex gap-2 bg-[#dcbca0] p-1 rounded">
+                <button onclick="game.changeSize(6, this)" class="btn-size active">6x6</button>
+                <button onclick="game.changeSize(8, this)" class="btn-size">8x8</button>
+                <button onclick="game.changeSize(10, this)" class="btn-size">10x10</button>
+                <button onclick="game.changeSize(12, this)" class="btn-size">12x12</button>
+            </div>
+            <button onclick="game.restart()" class="bg-[#8f7a66] text-white px-6 py-2 rounded-md font-extrabold shadow-[0_4px_0_#7f6a56] active:translate-y-1 active:shadow-none">新遊戲</button>
+        </div>
+
+        <div class="game-area" id="game-area">
+            <div id="grid-bg" class="grid-container">
+                <!-- 動態生成背景格 -->
+            </div>
+            
+            <div id="tile-container" class="tile-container"></div>
+            
+            <div id="game-over" class="overlay">
+                <h2 class="text-3xl font-extrabold text-[#776e65] mb-4">棋盤滿了！</h2>
+                <button onclick="game.restart()" class="bg-[#8f7a66] text-white px-8 py-3 rounded-md font-extrabold">再試一次</button>
+            </div>
+        </div>
+
+        <p class="mt-6 text-xs text-[#776e65] text-center opacity-75">
+            使用鍵盤方向鍵或滑動螢幕進行操作。<br>
+            網格越大，難度越低，但需要更多耐心！
+        </p>
+    </div>
+
+    <script>
+        class CustomGrid2048 {
+            constructor() {
+                this.gridSize = 6;
+                this.container = document.getElementById('tile-container');
+                this.gridBg = document.getElementById('grid-bg');
+                this.scoreElement = document.getElementById('score');
+                this.bestScoreElement = document.getElementById('best-score');
+                this.gameOverOverlay = document.getElementById('game-over');
+                
+                this.bestScore = localStorage.getItem('2048-custom-best') || 0;
+                this.bestScoreElement.textContent = this.bestScore;
+                
+                this.init();
+            }
+
+            init() {
+                this.board = Array(this.gridSize).fill().map(() => Array(this.gridSize).fill(null));
+                this.score = 0;
+                this.over = false;
+                this.scoreElement.textContent = 0;
+                this.gameOverOverlay.style.display = 'none';
+                this.container.innerHTML = '';
+                
+                // 重建背景網格
+                this.gridBg.style.gridTemplateColumns = `repeat(${this.gridSize}, 1fr)`;
+                this.gridBg.style.gridTemplateRows = `repeat(${this.gridSize}, 1fr)`;
+                this.gridBg.innerHTML = '';
+                for (let i = 0; i < this.gridSize * this.gridSize; i++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+                    this.gridBg.appendChild(cell);
+                }
+
+                this.addRandomTile();
+                this.addRandomTile();
+                this.render();
+            }
+
+            changeSize(newSize, btn) {
+                if (this.gridSize === newSize) return;
+                this.gridSize = newSize;
+                
+                // 更新按鈕樣式
+                document.querySelectorAll('.btn-size').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                this.init();
+            }
+
+            restart() { this.init(); }
+
+            addRandomTile() {
+                const emptyCells = [];
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        if (!this.board[r][c]) emptyCells.push({r, c});
+                    }
+                }
+                if (emptyCells.length > 0) {
+                    const {r, c} = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                    this.board[r][c] = {
+                        value: Math.random() < 0.9 ? 2 : 4,
+                        r, c,
+                        id: Math.random().toString(36).substr(2, 9)
+                    };
+                }
+            }
+
+            render() {
+                const currentTileIds = new Set();
+                const containerSize = this.container.offsetWidth;
+                const gap = 4;
+                const tileSize = (containerSize - (this.gridSize - 1) * gap) / this.gridSize;
+                const fontSize = this.gridSize > 8 ? '14px' : (this.gridSize > 5 ? '20px' : '32px');
+
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        const tile = this.board[r][c];
+                        if (tile) {
+                            this.renderTile(tile, tileSize, gap, fontSize);
+                            currentTileIds.add(tile.id);
+                        }
+                    }
+                }
+
+                const allDoms = this.container.querySelectorAll('.tile');
+                allDoms.forEach(dom => {
+                    if (!currentTileIds.has(dom.dataset.id)) dom.remove();
+                });
+
+                this.scoreElement.textContent = this.score;
+                if (this.score > this.bestScore) {
+                    this.bestScore = this.score;
+                    this.bestScoreElement.textContent = this.bestScore;
+                    localStorage.setItem('2048-custom-best', this.bestScore);
+                }
+            }
+
+            renderTile(tile, size, gap, fontSize) {
+                let element = document.querySelector(`[data-id="${tile.id}"]`);
+                const x = tile.c * (size + gap);
+                const y = tile.r * (size + gap);
+
+                const valueClass = tile.value > 2048 ? 'tile-super' : `tile-${tile.value}`;
+
+                if (!element) {
+                    element = document.createElement('div');
+                    element.className = `tile ${valueClass}`;
+                    element.dataset.id = tile.id;
+                    element.innerHTML = `<div class="tile-inner">${tile.value}</div>`;
+                    this.container.appendChild(element);
+                } else {
+                    element.className = `tile ${valueClass} ${tile.merged ? 'tile-merged' : ''}`;
+                    element.querySelector('.tile-inner').textContent = tile.value;
+                }
+
+                element.style.width = `${size}px`;
+                element.style.height = `${size}px`;
+                element.style.fontSize = fontSize;
+                element.style.transform = `translate(${x}px, ${y}px)`;
+            }
+
+            move(direction) {
+                if (this.over) return;
+                let moved = false;
+                const vectors = [{x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}];
+                const vector = vectors[direction];
+                
+                // 遍歷順序
+                const range = Array.from({length: this.gridSize}, (_, i) => i);
+                const traversalsX = direction === 1 ? [...range].reverse() : range;
+                const traversalsY = direction === 2 ? [...range].reverse() : range;
+
+                // 重置合併狀態
+                this.board.forEach(row => row.forEach(t => t && (t.merged = false)));
+
+                traversalsY.forEach(r => {
+                    traversalsX.forEach(c => {
+                        const tile = this.board[r][c];
+                        if (tile) {
+                            const farthest = this.findFarthestPosition(r, c, vector);
+                            const next = this.getNextTile(farthest, vector);
+
+                            if (next && next.value === tile.value && !next.merged) {
+                                // 合併
+                                const merged = {
+                                    value: tile.value * 2,
+                                    r: next.r,
+                                    c: next.c,
+                                    merged: true,
+                                    id: Math.random().toString(36).substr(2, 9)
+                                };
+                                this.board[next.r][next.c] = merged;
+                                this.board[r][c] = null;
+                                this.score += merged.value;
+                                moved = true;
+                            } else if (farthest.r !== r || farthest.c !== c) {
+                                // 移動
+                                this.board[farthest.r][farthest.c] = tile;
+                                this.board[r][c] = null;
+                                tile.r = farthest.r;
+                                tile.c = farthest.c;
+                                moved = true;
+                            }
+                        }
+                    });
+                });
+
+                if (moved) {
+                    this.addRandomTile();
+                    this.render();
+                    if (!this.canMove()) {
+                        this.over = true;
+                        this.gameOverOverlay.style.display = 'flex';
+                    }
+                }
+            }
+
+            findFarthestPosition(r, c, vector) {
+                let last;
+                do {
+                    last = {r, c};
+                    r += vector.y;
+                    c += vector.x;
+                } while (this.withinBounds(r, c) && !this.board[r][c]);
+                return last;
+            }
+
+            getNextTile(pos, vector) {
+                const r = pos.r + vector.y;
+                const c = pos.c + vector.x;
+                return this.withinBounds(r, c) ? this.board[r][c] : null;
+            }
+
+            withinBounds(r, c) { return r >= 0 && r < this.gridSize && c >= 0 && c < this.gridSize; }
+
+            canMove() {
+                for (let r = 0; r < this.gridSize; r++) {
+                    for (let c = 0; c < this.gridSize; c++) {
+                        if (!this.board[r][c]) return true;
+                        const tile = this.board[r][c];
+                        const neighbors = [{x:1, y:0}, {x:0, y:1}];
+                        for (let n of neighbors) {
+                            const nr = r + n.y, nc = c + n.x;
+                            if (this.withinBounds(nr, nc)) {
+                                const other = this.board[nr][nc];
+                                if (other && other.value === tile.value) return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        const game = new CustomGrid2048();
+
+        // 監聽鍵盤
+        window.addEventListener('keydown', e => {
+            const map = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
+            if (map[e.key] !== undefined) {
+                e.preventDefault();
+                game.move(map[e.key]);
+            }
+        });
+
+        // 監聽觸控
+        let tsX, tsY;
+        document.addEventListener('touchstart', e => {
+            tsX = e.touches[0].clientX;
+            tsY = e.touches[0].clientY;
+        }, {passive: false});
+
+        document.addEventListener('touchend', e => {
+            if (!tsX || !tsY) return;
+            const dx = e.changedTouches[0].clientX - tsX;
+            const dy = e.changedTouches[0].clientY - tsY;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > 30) {
+                if (Math.abs(dx) > Math.abs(dy)) game.move(dx > 0 ? 1 : 3);
+                else game.move(dy > 0 ? 2 : 0);
+            }
+            tsX = tsY = null;
+        }, {passive: false});
+
+        // 視窗大小改變時重新計算佈局
+        window.addEventListener('resize', () => game.render());
+    </script>
+</body>
+</html>
